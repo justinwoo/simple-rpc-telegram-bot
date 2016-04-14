@@ -1,0 +1,16 @@
+{
+  "name": "simple-rpc-telegram-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@cycle/core": "^6.0.3",
+    "node-telegram-bot-api": "^0.21.1",
+    "rx": "^4.1.0"
+  }
+}
