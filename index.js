@@ -18,10 +18,18 @@ function botDriver(input$) {
     bot.sendMessage(fromId, resp);
   }
 
-  bot.onText(/^gs$/, function (msg, match) {
+  function getShows(msg) {
     var fromId = msg.from.id;
     console.log('processing getshows');
     requests$.onNext(fromId);
+  }
+
+  bot.onText(/^gs$/i, function (msg, match) {
+    getShows(msg);
+  });
+
+  bot.onText(/^get$/i, function (msg, match) {
+    getShows(msg);
   });
 
   input$.subscribe(function (input) {
