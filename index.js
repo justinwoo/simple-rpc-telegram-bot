@@ -7,6 +7,7 @@ var TelegramBot = require('node-telegram-bot-api');
 var config = require('./config');
 var token = config.token;
 var torscraperPath = config.torscraperPath;
+var master = config.master;
 
 function botDriver(input$) {
   var requests$ = new Rx.ReplaySubject(1);
@@ -44,20 +45,27 @@ function botDriver(input$) {
 function torscraperDriver(requests$) {
   var output$ = new Rx.ReplaySubject(1);
 
-  requests$.subscribe(function (id) {
-    console.log('processing request from ', id);
+  Rx.Observable.merge(
+    requests$,
+    Rx.Observable.interval(1000 * 60 * 30).startWith(null).map(function () {})
+  ).subscribe(function (id) {
+    var source = id ? id : 'timer';
     var output = '';
     var torscraper = spawn('node', ['index.js'], {cwd: torscraperPath});
+    console.log('processing request from', source);
     torscraper.stdout.on('data', function (data) {
-      console.log('have data', data);
       output += data;
     });
     torscraper.on('close', function () {
       console.log('close', output);
-      output$.onNext({
-        id: id,
-        output: output
-      });
+      if (!id && output.indexOf('nothing new to download') !== -1) {
+        console.log('timer found nothing');
+      } else {
+        output$.onNext({
+          id: id || master,
+          output: output
+        });
+      }
     });
   });
 
