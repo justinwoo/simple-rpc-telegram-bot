@@ -1,8 +1,17 @@
-// module Main
-
+var fs = require('fs');
 var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
+
+exports.readTextFile = function (callback) {
+  return function (string) {
+    return function () {
+      fs.readFile(string, 'utf8', function (err, data) {
+        callback(data)();
+      });
+    }
+  }
+}
 
 exports.parseConfig = function (string) {
   var config = JSON.parse(string);

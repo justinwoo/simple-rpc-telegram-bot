@@ -6,11 +6,8 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, Error)
 import Data.Either (Either)
-import Node.Encoding (Encoding(UTF8))
-import Node.FS (FS)
-import Node.FS.Aff (readTextFile)
-import Node.Path (FilePath)
 
+type FilePath = String
 type Origin = String
 type Token = String
 type Id = Int
@@ -19,9 +16,14 @@ type Config =
   , torscraperPath :: FilePath
   , master :: Id
   }
+
+foreign import data FS :: !
+foreign import readTextFile :: forall e. (String -> Eff (fs :: FS | e) Unit) -> String -> Eff (fs :: FS | e) Unit
+readTextFile' :: forall e. String -> Aff (fs :: FS | e) String
+readTextFile' x = makeAff (\e s -> readTextFile s x)
 foreign import parseConfig :: String -> Config
 getConfig :: forall e. Aff (fs :: FS | e) Config
-getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
+getConfig = parseConfig <$> readTextFile' "./config.json"
 
 foreign import data TELEGRAM :: !
 type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
