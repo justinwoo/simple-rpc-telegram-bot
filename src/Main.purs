@@ -1,7 +1,7 @@
 module Main where
 
 import Prelude
-import Control.Monad.Aff (liftEff', makeAff, Aff, launchAff)
+import Control.Monad.Aff (Canceler, liftEff', makeAff, Aff, launchAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, Error)
@@ -71,14 +71,18 @@ subscribeToSource :: forall e a.
   Aff e (Either Error Unit)
 subscribeToSource handler source = liftEff' $ source $ handler
 
+type MyEffects e =
+  ( fs :: FS
+  , telegram :: TELEGRAM
+  , console :: CONSOLE
+  , timer :: TIMER
+  | e
+  )
+
 main :: forall e.
   Eff
-    ( err :: EXCEPTION
-    , fs :: FS
-    , telegram :: TELEGRAM
-    , console :: CONSOLE
-    , timer :: TIMER
-    | e) Unit
+    (MyEffects (err :: EXCEPTION | e))
+    (Canceler (MyEffects e))
 main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect' token
@@ -86,4 +90,4 @@ main = launchAff $ do
   let subscribeToSource' = subscribeToSource $ (runTorscraper torscraperPath) (sendMessage bot)
 
   subscribeToSource' $ addMessagesListener bot
-  subscribeToSource' $ interval (30 * 60 * 1000) master
+  subscribeToSource' $ interval (60 * 60 * 1000) master
