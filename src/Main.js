@@ -3,7 +3,7 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports.readTextFile = function (string, callback) {
+exports._readTextFile = function (string, callback) {
   return function () {
     fs.readFile(string, 'utf8', function (err, data) {
       callback(data)();
@@ -49,14 +49,14 @@ exports.runTorscraper = function (torscraperPath, request, callback) {
   };
 }
 
-exports.connect = function (token, callback) {
+exports._connect = function (token, callback) {
   return function () {
     callback(new TelegramBot(token, {polling: true}))();
     console.log('connected to Telegram');
   };
 }
 
-exports.sendMessage = function(bot, result) {
+exports._sendMessage = function(bot, result) {
   return function () {
     var id = result.id;
     var output = result.output;
