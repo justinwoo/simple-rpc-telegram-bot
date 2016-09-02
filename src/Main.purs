@@ -1,14 +1,17 @@
 module Main where
 
 import Prelude
-import Control.Monad.Aff (Canceler, liftEff', makeAff, Aff, launchAff)
+
+import Control.Alt ((<|>))
+import Control.Monad.Eff.Console as EffC
+import Control.Monad.Aff (Canceler, Aff, liftEff', launchAff, makeAff)
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
-import Control.Monad.Eff.Exception (EXCEPTION, Error)
-import Control.Observable (OBSERVABLE)
+import Control.Monad.Eff.Exception (message, EXCEPTION, Error)
+import Control.Observable (OBSERVABLE, subscribe, free, observable)
 import Data.Either (Either)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
-
 
 type FilePath = String
 type Origin = String
@@ -36,13 +39,20 @@ foreign import data TELEGRAM :: !
 type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
 foreign import data Bot :: *
 foreign import connect :: forall e.
-  (Bot -> Eff (TelegramEffects e) Unit) ->
-  Token ->
-  Eff (TelegramEffects e) Unit
+  Fn2
+    Token
+    (Bot -> Eff (TelegramEffects e) Unit)
+    (Eff (TelegramEffects e) Unit)
 connect' :: forall e. Token -> Aff (TelegramEffects e) Bot
-connect' token = makeAff (\e s -> connect s token)
+connect' token = makeAff (\e s -> runFn2 connect token s)
 
-foreign import sendMessage :: forall e. Bot -> Result -> Eff (TelegramEffects e) Unit
+foreign import sendMessage :: forall e.
+  Fn2
+    Bot
+    Result
+    (Eff (TelegramEffects e) Unit)
+sendMessage' :: forall e. Bot -> Result -> Eff (TelegramEffects e) Unit
+sendMessage' bot result = runFn2 sendMessage bot result
 
 type Request =
   { origin :: String
@@ -71,15 +81,27 @@ type Result =
 foreign import runTorscraper :: forall e.
   Fn3
     FilePath
-    (Result -> Eff (console :: CONSOLE | e) Unit)
     Request
-    (Eff (console :: CONSOLE | e) Unit)
+    (Result -> Eff (ConsoleEffects e) Unit)
+    (Eff (ConsoleEffects e) Unit)
 
 subscribeToSource :: forall e a.
   a ->
   (a -> Eff ( err :: EXCEPTION | e ) Unit ) ->
   Aff e (Either Error Unit)
 subscribeToSource handler source = liftEff' $ source $ handler
+
+handleRequest :: forall e.
+  String ->
+  (Result -> Eff (ConsoleEffects e) Unit) ->
+  (Request -> Eff (ConsoleEffects e) Unit)
+handleRequest path send' request =
+  runFn3 runTorscraper path request send'
+
+type ConsoleEffects e =
+  ( console :: CONSOLE
+  | e
+  )
 
 type MyEffects e =
   ( fs :: FS
@@ -98,7 +120,15 @@ main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect' token
 
-  let subscribeToSource' = subscribeToSource $ (runFn3 runTorscraper torscraperPath) (sendMessage bot)
-
-  subscribeToSource' $ runFn2 addMessagesListener bot
-  subscribeToSource' $ runFn3 interval (60 * 60 * 1000) master
+  requests <- liftEff $ observable \sink -> do
+    runFn2 addMessagesListener bot sink.next
+    free []
+  timer <- liftEff $ observable \sink -> do
+    runFn3 interval (60 * 60 * 1000) master sink.next
+    free []
+  liftEff $ subscribe
+    { next: handleRequest torscraperPath (sendMessage' bot)
+    , error: message >>> EffC.log
+    , complete: pure unit
+    }
+    $ requests <|> timer
