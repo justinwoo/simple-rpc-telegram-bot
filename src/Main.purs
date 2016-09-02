@@ -5,8 +5,10 @@ import Control.Monad.Aff (Canceler, liftEff', makeAff, Aff, launchAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, Error)
+import Control.Observable (OBSERVABLE)
 import Data.Either (Either)
-import Data.Function.Uncurried (runFn3, Fn3, runFn2, Fn2)
+import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
+
 
 type FilePath = String
 type Origin = String
@@ -48,16 +50,18 @@ type Request =
   }
 
 foreign import addMessagesListener :: forall e.
-  Bot ->
-  (Request -> Eff (TelegramEffects e) Unit) ->
-  Eff (TelegramEffects e) Unit
+  Fn2
+    Bot
+    (Request -> Eff (TelegramEffects e) Unit)
+    (Eff (TelegramEffects e) Unit)
 
 foreign import data TIMER :: !
 foreign import interval :: forall e.
-  Int ->
-  Id ->
-  (Request -> Eff (timer :: TIMER | e) Unit) ->
-  Eff (timer :: TIMER | e) Unit
+  Fn3
+    Int
+    Id
+    (Request -> Eff (timer :: TIMER | e) Unit)
+    (Eff (timer :: TIMER | e) Unit)
 
 type Result =
   { id :: Id
@@ -82,6 +86,7 @@ type MyEffects e =
   , telegram :: TELEGRAM
   , console :: CONSOLE
   , timer :: TIMER
+  , observable :: OBSERVABLE
   | e
   )
 
@@ -95,5 +100,5 @@ main = launchAff $ do
 
   let subscribeToSource' = subscribeToSource $ (runFn3 runTorscraper torscraperPath) (sendMessage bot)
 
-  subscribeToSource' $ addMessagesListener bot
-  subscribeToSource' $ interval (60 * 60 * 1000) master
+  subscribeToSource' $ runFn2 addMessagesListener bot
+  subscribeToSource' $ runFn3 interval (60 * 60 * 1000) master

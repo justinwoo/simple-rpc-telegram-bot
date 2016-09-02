@@ -73,30 +73,24 @@ exports.sendMessage = function(bot) {
   }
 }
 
-exports.addMessagesListener = function (bot) {
-  return function (callback) {
-    bot.onText(/^get$/i, function (msg, match) {
-      var fromId = msg.from.id;
-      callback({
-        origin: 'request',
-        id: fromId
-      })();
-      console.log('got request from', fromId);
-    });
-  }
+exports.addMessagesListener = function (bot, callback) {
+  bot.onText(/^get$/i, function (msg, match) {
+    var fromId = msg.from.id;
+    callback({
+      origin: 'request',
+      id: fromId
+    })();
+    console.log('got request from', fromId);
+  });
 }
 
-exports.interval = function (time) {
-  return function (id) {
-    return function (callback) {
-      var tick = function () {
-        callback({
-          origin: 'timer',
-          id: id
-        })();
-      };
-      tick();
-      setInterval(tick, time);
-    }
-  }
+exports.interval = function (time, id, callback) {
+  var tick = function () {
+    callback({
+      origin: 'timer',
+      id: id
+    })();
+  };
+  tick();
+  setInterval(tick, time);
 }
