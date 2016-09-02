@@ -3,13 +3,11 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports.readTextFile = function (callback) {
-  return function (string) {
-    return function () {
-      fs.readFile(string, 'utf8', function (err, data) {
-        callback(data)();
-      });
-    }
+exports.readTextFile = function (string, callback) {
+  return function () {
+    fs.readFile(string, 'utf8', function (err, data) {
+      callback(data)();
+    });
   }
 }
 
@@ -23,32 +21,28 @@ exports.parseConfig = function (string) {
   return config;
 }
 
-exports.runTorscraper = function (torscraperPath) {
-  return function (callback) {
-    return function (request) {
-      return function () {
-        var origin = request.origin;
-        var id = request.id;
-        var output = '';
-        var torscraper = spawn('node', ['index.js'], {cwd: torscraperPath});
-        console.log('processing request from', origin);
-        torscraper.stdout.on('data', function (data) {
-          output += data;
-        });
-        torscraper.on('close', function () {
-          if (!id && output.indexOf('nothing new to download') !== -1) {
-            console.log('timer found nothing');
-          } else {
-            callback({
-              id: id,
-              output: output,
-              origin: origin
-            })();
-          }
-        });
+exports.runTorscraper = function (torscraperPath, callback, request) {
+  return function () {
+    var origin = request.origin;
+    var id = request.id;
+    var output = '';
+    var torscraper = spawn('node', ['index.js'], {cwd: torscraperPath});
+    console.log('processing request from', origin);
+    torscraper.stdout.on('data', function (data) {
+      output += data;
+    });
+    torscraper.on('close', function () {
+      if (!id && output.indexOf('nothing new to download') !== -1) {
+        console.log('timer found nothing');
+      } else {
+        callback({
+          id: id,
+          output: output,
+          origin: origin
+        })();
       }
-    }
-  }
+    });
+  };
 }
 
 exports.connect = function (callback) {

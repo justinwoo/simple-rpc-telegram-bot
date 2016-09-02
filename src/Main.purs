@@ -6,6 +6,7 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, Error)
 import Data.Either (Either)
+import Data.Function.Uncurried (runFn3, Fn3, runFn2, Fn2)
 
 type FilePath = String
 type Origin = String
@@ -18,9 +19,13 @@ type Config =
   }
 
 foreign import data FS :: !
-foreign import readTextFile :: forall e. (String -> Eff (fs :: FS | e) Unit) -> String -> Eff (fs :: FS | e) Unit
+foreign import readTextFile :: forall e.
+  Fn2
+    String
+    (String -> Eff (fs :: FS | e) Unit)
+    (Eff (fs :: FS | e) Unit)
 readTextFile' :: forall e. String -> Aff (fs :: FS | e) String
-readTextFile' x = makeAff (\e s -> readTextFile s x)
+readTextFile' x = makeAff (\e s -> runFn2 readTextFile x s)
 foreign import parseConfig :: String -> Config
 getConfig :: forall e. Aff (fs :: FS | e) Config
 getConfig = parseConfig <$> readTextFile' "./config.json"
@@ -60,10 +65,11 @@ type Result =
   , origin :: Origin
   }
 foreign import runTorscraper :: forall e.
-  FilePath ->
-  (Result -> Eff (console :: CONSOLE | e) Unit) ->
-  Request ->
-  Eff (console :: CONSOLE | e) Unit
+  Fn3
+    FilePath
+    (Result -> Eff (console :: CONSOLE | e) Unit)
+    Request
+    (Eff (console :: CONSOLE | e) Unit)
 
 subscribeToSource :: forall e a.
   a ->
@@ -87,7 +93,7 @@ main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect' token
 
-  let subscribeToSource' = subscribeToSource $ (runTorscraper torscraperPath) (sendMessage bot)
+  let subscribeToSource' = subscribeToSource $ (runFn3 runTorscraper torscraperPath) (sendMessage bot)
 
   subscribeToSource' $ addMessagesListener bot
   subscribeToSource' $ interval (60 * 60 * 1000) master
