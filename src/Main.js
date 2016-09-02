@@ -21,7 +21,7 @@ exports.parseConfig = function (string) {
   return config;
 }
 
-exports.runTorscraper = function (torscraperPath, request, callback) {
+exports._runTorscraper = function (torscraperPath, request, callback) {
   return function () {
     var origin = request.origin;
     var id = request.id;
