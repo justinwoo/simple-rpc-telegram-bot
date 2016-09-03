@@ -9,7 +9,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, message)
 import Control.Monad.Eff.Unsafe (unsafePerformEff)
-import Control.Observable (OBSERVABLE, subscribe, free, observable)
+import Control.Observable (Observable, OBSERVABLE, subscribe, free, observable)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 
 type FilePath = String
@@ -77,22 +77,22 @@ type Result =
   , output :: String
   , origin :: Origin
   }
-foreign import _runTorscraper :: forall e.
+foreign import runTorscraper :: forall e.
   Fn3
     FilePath
     Request
     (Result -> Eff (ConsoleEffects e) Unit)
     (Eff (ConsoleEffects e) Unit)
-runTorscraper :: forall e. FilePath -> Request -> Aff (ConsoleEffects e) Result
-runTorscraper path req = makeAff (\e s -> runFn3 _runTorscraper path req s)
 
-handleRequest :: forall e.
-  String ->
-  (Result -> Eff (ConsoleEffects e) Unit) ->
-  (Request -> Eff (ConsoleEffects (err :: EXCEPTION | e)) Unit)
-handleRequest path send request = void <<< launchAff $ do
-  result <- runTorscraper path request
-  liftEff $ void $ send result
+fromCallback :: forall a e b.
+  (
+    (a -> Eff (observable :: OBSERVABLE | e) Unit) ->
+    Eff (observable :: OBSERVABLE | e) b
+  )
+  -> Eff (observable :: OBSERVABLE | e) (Observable a)
+fromCallback source = observable \sink -> do
+  source sink.next
+  free []
 
 type ConsoleEffects e =
   ( console :: CONSOLE
@@ -133,17 +133,12 @@ type MyEffects e =
 main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect token
-  requests <- liftEff $ observable \sink -> do
-    runFn2 addMessagesListener bot sink.next
-    free []
-  timer <- liftEff $ observable \sink -> do
-    runFn3 interval (60 * 60 * 1000) master sink.next
-    free []
+  requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
+  timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
   liftEff $ subscribe
     { next: (sendMessage bot)
     , error: message >>> EffC.log
     , complete: pure unit
     }
-    $ (requests <|> timer) >>= \request -> unsafePerformEff $ observable \sink -> do
-      runFn3 _runTorscraper torscraperPath request sink.next
-      free []
+    $ (requests <|> timer) >>= \request ->
+      unsafePerformEff $ fromCallback $ runFn3 runTorscraper torscraperPath request
