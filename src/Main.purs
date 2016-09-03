@@ -117,10 +117,11 @@ main = launchAff $ do
   bot <- connect token
   requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
   timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
+  let results = (requests <|> timer) >>= \request ->
+    unsafePerformEff $ fromCallback $ runFn3 runTorscraper torscraperPath request
   liftEff' $ subscribe
     { next: (sendMessage bot)
     , error: message >>> EffC.log
     , complete: pure unit
     }
-    $ (requests <|> timer) >>= \request ->
-      unsafePerformEff $ fromCallback $ runFn3 runTorscraper torscraperPath request
+    $ results
