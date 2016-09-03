@@ -3,7 +3,7 @@ module Main where
 import Prelude
 import Control.Monad.Eff.Console as EffC
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Canceler(Canceler), Aff, launchAff, makeAff)
+import Control.Monad.Aff (liftEff', Canceler, Aff, launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
@@ -108,34 +108,16 @@ type MyEffects e =
   | e
   )
 
--- my old signature:
--- main :: forall e.
---   Eff
---     (MyEffects (err :: EXCEPTION | e))
---     (Canceler (MyEffects e))
---
--- generated, doesn't work due to missing type class instance:
--- main :: forall t136.
---   Eff
---     ( err :: EXCEPTION
---     , fs :: FS
---     , telegram :: TELEGRAM
---     , console :: CONSOLE
---     | t136
---     )
---     (Canceler
---        ( fs :: FS
---        , telegram :: TELEGRAM
---        , console :: CONSOLE
---        | t136
---        )
---     )
+main :: forall e.
+  Eff
+    (MyEffects (err :: EXCEPTION | e))
+    (Canceler (MyEffects e))
 main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect token
   requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
   timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
-  liftEff $ subscribe
+  liftEff' $ subscribe
     { next: (sendMessage bot)
     , error: message >>> EffC.log
     , complete: pure unit
