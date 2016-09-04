@@ -9,7 +9,8 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, message)
 import Control.Monad.Eff.Unsafe (unsafePerformEff)
-import Control.Observable (Observable, EffO, OBSERVABLE, subscribe, free, observable)
+import Control.Observable (Observable, EffO, OBSERVABLE, subscribe)
+import Control.Observable.Lift (liftCallback)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 
 type FilePath = String
@@ -85,16 +86,6 @@ foreign import runTorscraper :: forall e.
     (Result -> Eff (ConsoleEffects e) Unit)
     (Eff (ConsoleEffects e) Unit)
 
-fromCallback :: forall a e b.
-  (
-    (a -> Eff (observable :: OBSERVABLE | e) Unit) ->
-    Eff (observable :: OBSERVABLE | e) b
-  )
-  -> Eff (observable :: OBSERVABLE | e) (Observable a)
-fromCallback source = observable \sink -> do
-  source sink.next
-  free []
-
 type ConsoleEffects e =
   ( console :: CONSOLE
   | e
@@ -119,10 +110,10 @@ main :: forall e.
 main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect token
-  requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
-  timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
+  requests <- liftEff $ liftCallback $ runFn2 addMessagesListener bot
+  timer <- liftEff $ liftCallback $ runFn3 interval (60 * 60 * 1000) master
   let results = (requests <|> timer) `bindEff` \request ->
-    fromCallback $ runFn3 runTorscraper torscraperPath request
+    liftCallback $ runFn3 runTorscraper torscraperPath request
   liftEff' $ subscribe
     { next: (sendMessage bot)
     , error: message >>> EffC.log
