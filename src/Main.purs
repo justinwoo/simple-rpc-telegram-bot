@@ -3,14 +3,14 @@ module Main where
 import Prelude
 import Control.Monad.Eff.Console as EffC
 import Control.Alt ((<|>))
-import Control.Monad.Aff (liftEff', Canceler, Aff, launchAff, makeAff)
+import Control.Monad.Aff (Canceler, Aff, liftEff', launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, message)
 import Control.Monad.Eff.Unsafe (unsafePerformEff)
 import Control.Observable (Observable, EffO, OBSERVABLE, subscribe)
-import Control.Observable.Lift (liftCallback)
+import Control.Observable.Lift (liftCallback, liftAff)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 
 type FilePath = String
@@ -79,12 +79,14 @@ type Result =
   , origin :: Origin
   }
 
-foreign import runTorscraper :: forall e.
+foreign import _runTorscraper :: forall e.
   Fn3
     FilePath
     Request
     (Result -> Eff (ConsoleEffects e) Unit)
     (Eff (ConsoleEffects e) Unit)
+runTorscraper :: forall e. FilePath -> Request -> Aff (ConsoleEffects e) Result
+runTorscraper path request = makeAff (\e s -> runFn3 _runTorscraper path request s)
 
 type ConsoleEffects e =
   ( console :: CONSOLE
@@ -113,7 +115,7 @@ main = launchAff $ do
   requests <- liftEff $ liftCallback $ runFn2 addMessagesListener bot
   timer <- liftEff $ liftCallback $ runFn3 interval (60 * 60 * 1000) master
   let results = (requests <|> timer) `bindEff` \request ->
-    liftCallback $ runFn3 runTorscraper torscraperPath request
+    liftAff $ runTorscraper torscraperPath request
   liftEff' $ subscribe
     { next: (sendMessage bot)
     , error: message >>> EffC.log
