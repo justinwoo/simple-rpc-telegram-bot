@@ -9,7 +9,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Exception (EXCEPTION, message)
 import Control.Monad.Eff.Unsafe (unsafePerformEff)
-import Control.Observable (Observable, EffO, OBSERVABLE, subscribe)
+import Control.Observable (Observable, EffO, OBSERVABLE, subscribe, bindEffO)
 import Control.Observable.Lift (liftCallback, liftAff)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 
@@ -114,7 +114,7 @@ main = launchAff $ do
   bot <- connect token
   requests <- liftEff $ liftCallback $ runFn2 addMessagesListener bot
   timer <- liftEff $ liftCallback $ runFn3 interval (60 * 60 * 1000) master
-  let results = (requests <|> timer) `bindEff` \request ->
+  results <- liftEff $ (requests <|> timer) `bindEffO` \request ->
     liftAff $ runTorscraper torscraperPath request
   liftEff' $ subscribe
     { next: (sendMessage bot)
