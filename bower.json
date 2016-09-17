@@ -14,6 +14,7 @@
     "purescript-prelude": "^1.0.1",
     "purescript-aff": "^1.1.0",
     "purescript-observable": "^2.2.0",
-    "purescript-observable-lift": "^0.1.0"
+    "purescript-observable-lift": "^0.1.0",
+    "purescript-xstream": "^0.2.0"
   }
 }

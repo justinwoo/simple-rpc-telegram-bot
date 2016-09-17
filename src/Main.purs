@@ -1,17 +1,17 @@
 module Main where
 
 import Prelude
-import Control.Monad.Eff.Console as EffC
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Canceler, Aff, liftEff', launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE)
-import Control.Monad.Eff.Exception (EXCEPTION, message)
-import Control.Monad.Eff.Unsafe (unsafePerformEff)
-import Control.Observable (Observable, EffO, OBSERVABLE, subscribe)
-import Control.Observable.Lift (liftCallback, liftAff)
+import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Eff.Exception (message, EXCEPTION)
+import Control.Monad.Eff.Ref (REF)
+import Control.XStream (fromAff, addListener, STREAM, bindEff, fromCallback)
+import Data.Either (fromRight)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
+import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
 type Origin = String
@@ -98,12 +98,13 @@ type MyEffects e =
   , telegram :: TELEGRAM
   , console :: CONSOLE
   , timer :: TIMER
-  , observable :: OBSERVABLE
+  , stream :: STREAM
+  , ref :: REF
   | e
   )
 
-bindEff :: forall e a b. Observable a -> (a -> EffO e (Observable b)) -> Observable b
-bindEff o f = o >>= f >>> unsafePerformEff
+liftEff'' :: forall e a. Eff (err :: EXCEPTION | e) a -> Aff e a
+liftEff'' = map (unsafePartial fromRight) <$> liftEff'
 
 main :: forall e.
   Eff
@@ -112,13 +113,24 @@ main :: forall e.
 main = launchAff $ do
   {token, torscraperPath, master} <- getConfig
   bot <- connect token
-  requests <- liftEff $ liftCallback $ runFn2 addMessagesListener bot
-  timer <- liftEff $ liftCallback $ runFn3 interval (60 * 60 * 1000) master
-  let results = (requests <|> timer) `bindEff` \request ->
-    liftAff $ runTorscraper torscraperPath request
-  liftEff' $ subscribe
-    { next: (sendMessage bot)
-    , error: message >>> EffC.log
-    , complete: pure unit
+  requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
+  timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
+  let sendMessage' = sendMessage bot
+  let runTorscraper' = runTorscraper torscraperPath
+  liftEff' $ addListener
+    { next: \request -> void $ launchAff do
+        result <- runTorscraper' request
+        liftEff $ sendMessage' result
+    , error: message >>> log
+    , complete: const $ pure unit
     }
-    $ results
+    (requests <|> timer)
+  -- results <- liftEff'' $ (requests <|> timer) `bindEff` \request ->
+  --   fromAff $ runTorscraper torscraperPath request
+  -- let sendMessage' = sendMessage bot
+  -- liftEff' $ addListener
+  --   { next: sendMessage'
+  --   , error: message >>> log
+  --   , complete: const $ pure unit
+  --   }
+  --   results
