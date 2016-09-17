@@ -8,7 +8,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (message, EXCEPTION)
 import Control.Monad.Eff.Ref (REF)
-import Control.XStream (fromAff, addListener, STREAM, bindEff, fromCallback)
+import Control.XStream (STREAM, addListener, fromAff, bindEff, fromCallback)
 import Data.Either (fromRight)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 import Partial.Unsafe (unsafePartial)
@@ -115,22 +115,11 @@ main = launchAff $ do
   bot <- connect token
   requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
   timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
-  let sendMessage' = sendMessage bot
-  let runTorscraper' = runTorscraper torscraperPath
+  results <- liftEff $ (requests <|> timer) `bindEff` \request ->
+    fromAff $ runTorscraper torscraperPath request
   liftEff' $ addListener
-    { next: \request -> void $ launchAff do
-        result <- runTorscraper' request
-        liftEff $ sendMessage' result
+    { next: sendMessage bot
     , error: message >>> log
     , complete: const $ pure unit
     }
-    (requests <|> timer)
-  -- results <- liftEff'' $ (requests <|> timer) `bindEff` \request ->
-  --   fromAff $ runTorscraper torscraperPath request
-  -- let sendMessage' = sendMessage bot
-  -- liftEff' $ addListener
-  --   { next: sendMessage'
-  --   , error: message >>> log
-  --   , complete: const $ pure unit
-  --   }
-  --   results
+    results
