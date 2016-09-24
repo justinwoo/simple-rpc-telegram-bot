@@ -2,9 +2,9 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports._connect = function (token, eff) {
+exports.connect = function (token) {
   return function () {
-    eff(new TelegramBot(token, {polling: true}))();
+    return new TelegramBot(token, {polling: true});
   };
 }
 

@@ -13,7 +13,7 @@ import Control.XStream (periodic, switchMapEff, STREAM, addListener, fromAff, fr
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
-import Data.Function.Uncurried (Fn3, Fn2, runFn3, runFn2)
+import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Maybe (Maybe(Just))
 import Data.String (indexOf)
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
@@ -24,20 +24,49 @@ import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
+
 type Token = String
+
 type Id = Int
+
 type Config =
   { token :: Token
   , torscraperPath :: FilePath
   , master :: Id
   }
+
 data RequestOrigin
   = User
   | Timer
+
 type Request =
   { origin :: RequestOrigin
   , id :: Id
   }
+
+type Result =
+  { id :: Id
+  , output :: String
+  , origin :: RequestOrigin
+  }
+
+type MyEffects e =
+  ( fs :: FS
+  , telegram :: TELEGRAM
+  , cp :: CHILD_PROCESS
+  , ref :: REF
+  , console :: CONSOLE
+  , timer :: TIMER
+  , stream :: STREAM
+  | e
+  )
+
+type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
+
+
+foreign import data TELEGRAM :: !
+
+foreign import data Bot :: *
 
 parseConfig :: String -> Either ForeignError Config
 parseConfig json = do
@@ -53,16 +82,7 @@ parseConfig json = do
 getConfig :: forall e. Aff (fs :: FS | e) (Either ForeignError Config)
 getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
 
-foreign import data TELEGRAM :: !
-type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
-foreign import data Bot :: *
-foreign import _connect :: forall e.
-  Fn2
-    Token
-    (Bot -> Eff (TelegramEffects e) Unit)
-    (Eff (TelegramEffects e) Unit)
-connect :: forall e. Token -> Aff (TelegramEffects e) Bot
-connect token = makeAff (\e s -> runFn2 _connect token s)
+foreign import connect :: forall e. Token -> Eff (TelegramEffects e) Bot
 
 foreign import _sendMessage :: forall e.
   Fn3
@@ -90,12 +110,6 @@ foreign import addMessagesListener :: forall e.
     (Request -> Eff (TelegramEffects e) Unit)
     (Eff (TelegramEffects e) Unit)
 
-type Result =
-  { id :: Id
-  , output :: String
-  , origin :: RequestOrigin
-  }
-
 runTorscraper :: forall e.
   String ->
   Request ->
@@ -117,22 +131,6 @@ runTorscraper path request = makeAff \e s -> do
     output <- readRef ref
     s { id: request.id, origin: request.origin, output: output }
 
-type ConsoleEffects e =
-  ( console :: CONSOLE
-  | e
-  )
-
-type MyEffects e =
-  ( fs :: FS
-  , telegram :: TELEGRAM
-  , cp :: CHILD_PROCESS
-  , ref :: REF
-  , console :: CONSOLE
-  , timer :: TIMER
-  , stream :: STREAM
-  | e
-  )
-
 liftEff'' :: forall e a. Eff (err :: EXCEPTION | e) a -> Aff e a
 liftEff'' = map (unsafePartial fromRight) <$> liftEff'
 
@@ -146,7 +144,7 @@ main = launchAff $ do
     Left e -> liftEff' $ log "config.json is malformed. closing."
     Right {token, torscraperPath, master} -> do
       let timerRequest = {id: master, origin: Timer}
-      bot <- connect token
+      bot <- liftEff $ connect token
       requests <- liftEff $ fromCallback $ runFn3 addMessagesListener bot User
       timer <- liftEff'' $ periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
