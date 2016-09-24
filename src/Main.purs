@@ -11,6 +11,9 @@ import Control.Monad.Eff.Ref (REF)
 import Control.XStream (switchMapEff, STREAM, addListener, fromAff, fromCallback)
 import Data.Either (fromRight)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
+import Node.Encoding (Encoding(UTF8))
+import Node.FS (FS)
+import Node.FS.Aff (readTextFile)
 import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
@@ -23,17 +26,9 @@ type Config =
   , master :: Id
   }
 
-foreign import data FS :: !
-foreign import _readTextFile :: forall e.
-  Fn2
-    String
-    (String -> Eff (fs :: FS | e) Unit)
-    (Eff (fs :: FS | e) Unit)
-readTextFile :: forall e. String -> Aff (fs :: FS | e) String
-readTextFile x = makeAff (\e s -> runFn2 _readTextFile x s)
 foreign import parseConfig :: String -> Config
 getConfig :: forall e. Aff (fs :: FS | e) Config
-getConfig = parseConfig <$> readTextFile "./config.json"
+getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
 
 foreign import data TELEGRAM :: !
 type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
