@@ -9,7 +9,9 @@ import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (message, EXCEPTION)
 import Control.Monad.Eff.Ref (REF)
 import Control.XStream (switchMapEff, STREAM, addListener, fromAff, fromCallback)
-import Data.Either (fromRight)
+import Data.Either (Either(Right, Left), fromRight)
+import Data.Foreign (ForeignError, parseJSON)
+import Data.Foreign.Class (readProp)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
@@ -26,8 +28,18 @@ type Config =
   , master :: Id
   }
 
-foreign import parseConfig :: String -> Config
-getConfig :: forall e. Aff (fs :: FS | e) Config
+parseConfig :: String -> Either ForeignError Config
+parseConfig json = do
+  value <- parseJSON json
+  token <- readProp "token" value
+  torscraperPath <- readProp "torscraperPath" value
+  master <- readProp "master" value
+  pure $ { token: token
+  , torscraperPath: torscraperPath
+  , master: master
+  }
+
+getConfig :: forall e. Aff (fs :: FS | e) (Either ForeignError Config)
 getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
 
 foreign import data TELEGRAM :: !
@@ -106,15 +118,18 @@ main :: forall e.
     (MyEffects (err :: EXCEPTION | e))
     (Canceler (MyEffects e))
 main = launchAff $ do
-  {token, torscraperPath, master} <- getConfig
-  bot <- connect token
-  requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
-  timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
-  results <- liftEff $ (requests <|> timer) `switchMapEff` \request ->
-    fromAff $ runTorscraper torscraperPath request
-  liftEff' $ addListener
-    { next: sendMessage bot
-    , error: message >>> log
-    , complete: const $ pure unit
-    }
-    results
+  config <- getConfig
+  case config of
+    Left e -> liftEff' $ log "config.json is malformed. closing."
+    Right {token, torscraperPath, master} -> do
+      bot <- connect token
+      requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
+      timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
+      results <- liftEff $ (requests <|> timer) `switchMapEff` \request ->
+        fromAff $ runTorscraper torscraperPath request
+      liftEff' $ addListener
+        { next: sendMessage bot
+        , error: message >>> log
+        , complete: const $ pure unit
+        }
+        results

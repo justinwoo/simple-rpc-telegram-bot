@@ -2,16 +2,6 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports.parseConfig = function (string) {
-  var config = JSON.parse(string);
-
-  if (!config.token) throw "missing {token} in config (telegram bot token)"
-  if (!config.torscraperPath) throw "missing {torscraperPath} in config (path to torscraper)"
-  if (!config.master) throw "missing {master} in config (numeric id of telegram master)"
-
-  return config;
-}
-
 exports._runTorscraper = function (torscraperPath, request, callback) {
   return function () {
     var origin = request.origin;
