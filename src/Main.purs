@@ -74,10 +74,11 @@ parseConfig json = do
   token <- readProp "token" value
   torscraperPath <- readProp "torscraperPath" value
   master <- readProp "master" value
-  pure $ { token: token
-  , torscraperPath: torscraperPath
-  , master: master
-  }
+  pure
+    { token: token
+    , torscraperPath: torscraperPath
+    , master: master
+    }
 
 getConfig :: forall e. Aff (fs :: FS | e) (Either ForeignError Config)
 getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
