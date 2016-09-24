@@ -8,11 +8,12 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
-import Control.XStream (switchMapEff, STREAM, addListener, fromAff, fromCallback)
+import Control.Monad.Eff.Timer (TIMER)
+import Control.XStream (periodic, switchMapEff, STREAM, addListener, fromAff, fromCallback)
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
-import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
+import Data.Function.Uncurried (Fn2, runFn2)
 import Data.Maybe (Maybe(Just))
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
@@ -75,14 +76,6 @@ foreign import addMessagesListener :: forall e.
     (Request -> Eff (TelegramEffects e) Unit)
     (Eff (TelegramEffects e) Unit)
 
-foreign import data TIMER :: !
-foreign import interval :: forall e.
-  Fn3
-    Int
-    Id
-    (Request -> Eff (timer :: TIMER | e) Unit)
-    (Eff (timer :: TIMER | e) Unit)
-
 type Result =
   { id :: Id
   , output :: String
@@ -138,10 +131,12 @@ main = launchAff $ do
   case config of
     Left e -> liftEff' $ log "config.json is malformed. closing."
     Right {token, torscraperPath, master} -> do
+      let timerRequest = {id: master, origin: "timer"}
       bot <- connect token
       requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
-      timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
-      results <- liftEff'' $ (requests <|> timer) `switchMapEff` \request ->
+      timer <- liftEff'' $ periodic (60 * 60 * 1000)
+      let timer' = const timerRequest <$> timer
+      results <- liftEff'' $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
       liftEff' $ addListener
         { next: sendMessage bot

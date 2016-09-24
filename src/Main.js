@@ -2,10 +2,9 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports._connect = function (token, callback) {
+exports._connect = function (token, eff) {
   return function () {
-    callback(new TelegramBot(token, {polling: true}))();
-    console.log('connected to Telegram');
+    eff(new TelegramBot(token, {polling: true}))();
   };
 }
 
@@ -26,28 +25,15 @@ exports._sendMessage = function(bot, result) {
   };
 }
 
-exports.addMessagesListener = function (bot, callback) {
+exports.addMessagesListener = function (bot, eff) {
   return function () {
     bot.onText(/^get$/i, function (msg, match) {
       var fromId = msg.from.id;
-      callback({
+      eff({
         origin: 'request',
         id: fromId
       })();
       console.log('got request from', fromId);
     });
-  };
-}
-
-exports.interval = function (time, id, callback) {
-  return function () {
-    var tick = function () {
-      callback({
-        origin: 'timer',
-        id: id
-      })();
-    };
-    tick();
-    setInterval(tick, time);
   };
 }
