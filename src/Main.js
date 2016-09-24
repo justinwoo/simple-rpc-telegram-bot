@@ -8,20 +8,9 @@ exports._connect = function (token, eff) {
   };
 }
 
-exports._sendMessage = function(bot, result, isTimer) {
+exports._sendMessage = function(bot, id, message) {
   return function () {
-    var id = result.id;
-    var output = result.output;
-    var origin = result.origin;
-
-    if (output.length > 0) {
-      if (isTimer(origin) && output.indexOf('nothing new to download') !== -1) {
-        console.log('timer found nothing');
-      } else {
-        console.log(output);
-        bot.sendMessage(id, output);
-      }
-    }
+    bot.sendMessage(id, message);
   };
 }
 

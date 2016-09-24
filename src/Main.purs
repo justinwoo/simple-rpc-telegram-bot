@@ -15,6 +15,7 @@ import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
 import Data.Function.Uncurried (Fn3, Fn2, runFn3, runFn2)
 import Data.Maybe (Maybe(Just))
+import Data.String (indexOf)
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
@@ -66,14 +67,21 @@ connect token = makeAff (\e s -> runFn2 _connect token s)
 foreign import _sendMessage :: forall e.
   Fn3
     Bot
-    Result
-    (RequestOrigin -> Boolean)
+    Int
+    String
     (Eff (TelegramEffects e) Unit)
-isTimer :: RequestOrigin -> Boolean
-isTimer Timer = true
-isTimer _ = false
 sendMessage :: forall e. Bot -> Result -> Eff (TelegramEffects e) Unit
-sendMessage bot result = runFn3 _sendMessage bot result isTimer
+sendMessage bot {id, output, origin} = do
+  case origin of
+    Timer ->
+      case indexOf "nothing new to download" output of
+        Just _ -> log "timer found nothing"
+        _ -> send
+    _ -> send
+  where
+    send = do
+      log output
+      runFn3 _sendMessage bot id output
 
 foreign import addMessagesListener :: forall e.
   Fn3
