@@ -63,7 +63,6 @@ type MyEffects e =
 
 type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
 
-
 foreign import data TELEGRAM :: !
 
 foreign import data Bot :: *
@@ -144,10 +143,10 @@ main = launchAff $ do
   case config of
     Left e -> liftEff' $ log "config.json is malformed. closing."
     Right {token, torscraperPath, master} -> do
-      let timerRequest = {id: master, origin: Timer}
       bot <- liftEff $ connect token
       requests <- liftEff $ fromCallback $ runFn3 addMessagesListener bot User
-      timer <- liftEff'' $ periodic (60 * 60 * 1000)
+      let timerRequest = {id: master, origin: Timer}
+      timer <- liftEff $ periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
       results <- liftEff'' $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
