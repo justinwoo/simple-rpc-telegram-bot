@@ -17,6 +17,8 @@
     "purescript-observable-lift": "^0.1.0",
     "purescript-xstream": "^0.3.0",
     "purescript-node-fs-aff": "^2.0.0",
-    "purescript-foreign": "^1.1.0"
+    "purescript-foreign": "^1.1.0",
+    "purescript-node-child-process": "^2.0.0",
+    "purescript-refs": "^1.0.0"
   }
 }

@@ -2,34 +2,6 @@ var spawn = require('child_process').spawn;
 var path = require('path');
 var TelegramBot = require('node-telegram-bot-api');
 
-exports._runTorscraper = function (torscraperPath, request, callback) {
-  return function () {
-    var origin = request.origin;
-    var id = request.id;
-    var output = '';
-    var torscraper = spawn('node', ['index.js'], {cwd: torscraperPath});
-    console.log('processing request from', origin);
-    torscraper.stdout.on('data', function (data) {
-      output += data;
-    });
-    torscraper.on('close', function () {
-      if (!id && output.indexOf('nothing new to download') !== -1) {
-        callback({
-          id: origin,
-          output: '',
-          origin: origin
-        })();
-      } else {
-        callback({
-          id: id,
-          output: output,
-          origin: origin
-        })();
-      }
-    });
-  };
-}
-
 exports._connect = function (token, callback) {
   return function () {
     callback(new TelegramBot(token, {polling: true}))();

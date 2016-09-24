@@ -7,15 +7,18 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (message, EXCEPTION)
-import Control.Monad.Eff.Ref (REF)
+import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.XStream (switchMapEff, STREAM, addListener, fromAff, fromCallback)
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
 import Data.Function.Uncurried (Fn3, runFn3, runFn2, Fn2)
+import Data.Maybe (Maybe(Just))
+import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
+import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
@@ -86,14 +89,26 @@ type Result =
   , origin :: Origin
   }
 
-foreign import _runTorscraper :: forall e.
-  Fn3
-    FilePath
-    Request
-    (Result -> Eff (ConsoleEffects e) Unit)
-    (Eff (ConsoleEffects e) Unit)
-runTorscraper :: forall e. FilePath -> Request -> Aff (ConsoleEffects e) Result
-runTorscraper path request = makeAff (\e s -> runFn3 _runTorscraper path request s)
+runTorscraper :: forall e.
+  String ->
+  Request ->
+  Aff
+    ( ref :: REF
+    , err :: EXCEPTION
+    , cp :: CHILD_PROCESS
+    | e
+    )
+    Result
+runTorscraper path request = makeAff \e s -> do
+  ref <- newRef ""
+  process <- spawn "node" ["index.js"] $
+    defaultSpawnOptions { cwd = Just path }
+  onDataString (stdout process) UTF8 \string ->
+    modifyRef ref $ append string
+  onError process $ toStandardError >>> e
+  onExit process \exit -> do
+    output <- readRef ref
+    s { id: request.id, origin: request.origin, output: output }
 
 type ConsoleEffects e =
   ( console :: CONSOLE
@@ -103,10 +118,11 @@ type ConsoleEffects e =
 type MyEffects e =
   ( fs :: FS
   , telegram :: TELEGRAM
+  , cp :: CHILD_PROCESS
+  , ref :: REF
   , console :: CONSOLE
   , timer :: TIMER
   , stream :: STREAM
-  , ref :: REF
   | e
   )
 
@@ -125,7 +141,7 @@ main = launchAff $ do
       bot <- connect token
       requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
       timer <- liftEff $ fromCallback $ runFn3 interval (60 * 60 * 1000) master
-      results <- liftEff $ (requests <|> timer) `switchMapEff` \request ->
+      results <- liftEff'' $ (requests <|> timer) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
       liftEff' $ addListener
         { next: sendMessage bot
