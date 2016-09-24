@@ -13,7 +13,7 @@ import Control.XStream (periodic, switchMapEff, STREAM, addListener, fromAff, fr
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
-import Data.Function.Uncurried (Fn2, runFn2)
+import Data.Function.Uncurried (Fn3, Fn2, runFn3, runFn2)
 import Data.Maybe (Maybe(Just))
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
@@ -23,13 +23,19 @@ import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
-type Origin = String
 type Token = String
 type Id = Int
 type Config =
   { token :: Token
   , torscraperPath :: FilePath
   , master :: Id
+  }
+data RequestOrigin
+  = User
+  | Timer
+type Request =
+  { origin :: RequestOrigin
+  , id :: Id
   }
 
 parseConfig :: String -> Either ForeignError Config
@@ -58,28 +64,28 @@ connect :: forall e. Token -> Aff (TelegramEffects e) Bot
 connect token = makeAff (\e s -> runFn2 _connect token s)
 
 foreign import _sendMessage :: forall e.
-  Fn2
+  Fn3
     Bot
     Result
+    (RequestOrigin -> Boolean)
     (Eff (TelegramEffects e) Unit)
+isTimer :: RequestOrigin -> Boolean
+isTimer Timer = true
+isTimer _ = false
 sendMessage :: forall e. Bot -> Result -> Eff (TelegramEffects e) Unit
-sendMessage bot result = runFn2 _sendMessage bot result
-
-type Request =
-  { origin :: String
-  , id :: Id
-  }
+sendMessage bot result = runFn3 _sendMessage bot result isTimer
 
 foreign import addMessagesListener :: forall e.
-  Fn2
+  Fn3
     Bot
+    RequestOrigin
     (Request -> Eff (TelegramEffects e) Unit)
     (Eff (TelegramEffects e) Unit)
 
 type Result =
   { id :: Id
   , output :: String
-  , origin :: Origin
+  , origin :: RequestOrigin
   }
 
 runTorscraper :: forall e.
@@ -131,9 +137,9 @@ main = launchAff $ do
   case config of
     Left e -> liftEff' $ log "config.json is malformed. closing."
     Right {token, torscraperPath, master} -> do
-      let timerRequest = {id: master, origin: "timer"}
+      let timerRequest = {id: master, origin: Timer}
       bot <- connect token
-      requests <- liftEff $ fromCallback $ runFn2 addMessagesListener bot
+      requests <- liftEff $ fromCallback $ runFn3 addMessagesListener bot User
       timer <- liftEff'' $ periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
       results <- liftEff'' $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->

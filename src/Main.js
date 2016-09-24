@@ -8,14 +8,14 @@ exports._connect = function (token, eff) {
   };
 }
 
-exports._sendMessage = function(bot, result) {
+exports._sendMessage = function(bot, result, isTimer) {
   return function () {
     var id = result.id;
     var output = result.output;
     var origin = result.origin;
 
     if (output.length > 0) {
-      if (origin === 'timer' && output.indexOf('nothing new to download') !== -1) {
+      if (isTimer(origin) && output.indexOf('nothing new to download') !== -1) {
         console.log('timer found nothing');
       } else {
         console.log(output);
@@ -25,12 +25,12 @@ exports._sendMessage = function(bot, result) {
   };
 }
 
-exports.addMessagesListener = function (bot, eff) {
+exports.addMessagesListener = function (bot, User, eff) {
   return function () {
     bot.onText(/^get$/i, function (msg, match) {
       var fromId = msg.from.id;
       eff({
-        origin: 'request',
+        origin: User,
         id: fromId
       })();
       console.log('got request from', fromId);
