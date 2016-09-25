@@ -6,11 +6,11 @@ import Control.Monad.Aff (Canceler, Aff, liftEff', launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
-import Control.Monad.Eff.Exception (message, EXCEPTION)
+import Control.Monad.Eff.Exception (try, message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
 import Control.XStream (periodic, switchMapEff, STREAM, addListener, fromAff, fromCallback)
-import Data.Either (Either(Right, Left), fromRight)
+import Data.Either (Either(Right, Left))
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
 import Data.Function.Uncurried (Fn3, runFn3)
@@ -21,7 +21,6 @@ import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
-import Partial.Unsafe (unsafePartial)
 
 type FilePath = String
 
@@ -115,7 +114,6 @@ runTorscraper :: forall e.
   Request ->
   Aff
     ( ref :: REF
-    , err :: EXCEPTION
     , cp :: CHILD_PROCESS
     | e
     )
@@ -124,15 +122,15 @@ runTorscraper path request = makeAff \e s -> do
   ref <- newRef ""
   process <- spawn "node" ["index.js"] $
     defaultSpawnOptions { cwd = Just path }
-  onDataString (stdout process) UTF8 \string ->
+  result <- try $ onDataString (stdout process) UTF8 \string ->
     modifyRef ref $ append string
-  onError process $ toStandardError >>> e
-  onExit process \exit -> do
-    output <- readRef ref
-    s { id: request.id, origin: request.origin, output: output }
-
-liftEff'' :: forall e a. Eff (err :: EXCEPTION | e) a -> Aff e a
-liftEff'' = map (unsafePartial fromRight) <$> liftEff'
+  case result of
+    Right _ -> do
+      onError process $ toStandardError >>> e
+      onExit process \exit -> do
+        output <- readRef ref
+        s { id: request.id, origin: request.origin, output: output }
+    Left err -> e err
 
 main :: forall e.
   Eff
@@ -148,7 +146,7 @@ main = launchAff $ do
       let timerRequest = {id: master, origin: Timer}
       timer <- liftEff $ periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
-      results <- liftEff'' $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
+      results <- liftEff $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
       liftEff' $ addListener
         { next: sendMessage bot
