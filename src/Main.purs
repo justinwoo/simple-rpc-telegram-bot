@@ -9,18 +9,20 @@ import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (try, message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
-import Control.XStream (periodic, switchMapEff, STREAM, addListener, fromAff, fromCallback)
-import Data.Either (Either(Right, Left))
+import Control.XStream (Stream, STREAM, addListener, fromAff, switchMapEff, periodic, create)
+import Data.Either (fromRight, Either(Right, Left))
 import Data.Foreign (ForeignError, parseJSON)
 import Data.Foreign.Class (readProp)
-import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Maybe (Maybe(Just))
 import Data.String (indexOf)
+import Data.String.Regex (noFlags, regex)
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
+import Partial.Unsafe (unsafePartial)
+import TelegramBot (TELEGRAM, Bot, connect, addMessagesListener, sendMessage)
 
 type FilePath = String
 
@@ -60,12 +62,6 @@ type MyEffects e =
   | e
   )
 
-type TelegramEffects e = (telegram :: TELEGRAM, console :: CONSOLE | e)
-
-foreign import data TELEGRAM :: !
-
-foreign import data Bot :: *
-
 parseConfig :: String -> Either ForeignError Config
 parseConfig json = do
   value <- parseJSON json
@@ -81,16 +77,15 @@ parseConfig json = do
 getConfig :: forall e. Aff (fs :: FS | e) (Either ForeignError Config)
 getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
 
-foreign import connect :: forall e. Token -> Eff (TelegramEffects e) Bot
-
-foreign import _sendMessage :: forall e.
-  Fn3
-    Bot
-    Int
-    String
-    (Eff (TelegramEffects e) Unit)
-sendMessage :: forall e. Bot -> Result -> Eff (TelegramEffects e) Unit
-sendMessage bot {id, output, origin} = do
+sendMessage' :: forall e.
+  Bot ->
+  Result ->
+  Eff
+    ( telegram :: TELEGRAM
+    , console :: CONSOLE
+    | e
+    ) Unit
+sendMessage' bot {id, output, origin} = do
   case origin of
     Timer ->
       case indexOf "nothing new to download" output of
@@ -100,14 +95,7 @@ sendMessage bot {id, output, origin} = do
   where
     send = do
       log output
-      runFn3 _sendMessage bot id output
-
-foreign import addMessagesListener :: forall e.
-  Fn3
-    Bot
-    RequestOrigin
-    (Request -> Eff (TelegramEffects e) Unit)
-    (Eff (TelegramEffects e) Unit)
+      sendMessage bot id output
 
 runTorscraper :: forall e.
   String ->
@@ -132,6 +120,23 @@ runTorscraper path request = makeAff \e s -> do
         s { id: request.id, origin: request.origin, output: output }
     Left err -> e err
 
+addMessagesListener' :: forall e.
+  Bot ->
+  Eff
+    ( stream :: STREAM
+    , telegram :: TELEGRAM
+    | e
+    )
+    (Stream Int)
+addMessagesListener' bot = do
+  let pattern = unsafePartial $ fromRight $ regex "^get$" $ noFlags {ignoreCase = true}
+  create
+    { start: \l -> do
+        addMessagesListener bot pattern \m s -> do
+          l.next m.from.id
+    , stop: const $ pure unit
+    }
+
 main :: forall e.
   Eff
     (MyEffects (err :: EXCEPTION | e))
@@ -142,14 +147,14 @@ main = launchAff $ do
     Left e -> liftEff' $ log "config.json is malformed. closing."
     Right {token, torscraperPath, master} -> do
       bot <- liftEff $ connect token
-      requests <- liftEff $ fromCallback $ runFn3 addMessagesListener bot User
+      requests <- liftEff $ map {id: _, origin: User} <$> addMessagesListener' bot
       let timerRequest = {id: master, origin: Timer}
       timer <- liftEff $ periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
       results <- liftEff $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
       liftEff' $ addListener
-        { next: sendMessage bot
+        { next: sendMessage' bot
         , error: message >>> log
         , complete: const $ pure unit
         }
