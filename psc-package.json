@@ -1,0 +1,13 @@
+{
+    "name": "simple-rpc-telegram-bot",
+    "set": "psc-0.10.2",
+    "source": "https://github.com/purescript/package-sets.git",
+    "depends": [
+        "refs",
+        "node-child-process",
+        "foreign",
+        "node-fs-aff",
+        "aff",
+        "prelude"
+    ]
+}

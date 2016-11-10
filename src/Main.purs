@@ -9,13 +9,15 @@ import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (try, message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
+import Control.Monad.Except (runExcept)
 import Control.XStream (Stream, STREAM, addListener, fromAff, switchMapEff, periodic, create)
 import Data.Either (fromRight, Either(Right, Left))
-import Data.Foreign (ForeignError, parseJSON)
+import Data.Foreign (F, parseJSON)
 import Data.Foreign.Class (readProp)
 import Data.Maybe (Maybe(Just))
-import Data.String (indexOf)
-import Data.String.Regex (noFlags, regex)
+import Data.String (Pattern(Pattern), indexOf)
+import Data.String.Regex (regex)
+import Data.String.Regex.Flags (ignoreCase)
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
@@ -62,7 +64,7 @@ type MyEffects e =
   | e
   )
 
-parseConfig :: String -> Either ForeignError Config
+parseConfig :: String -> F Config
 parseConfig json = do
   value <- parseJSON json
   token <- readProp "token" value
@@ -74,7 +76,7 @@ parseConfig json = do
     , master: master
     }
 
-getConfig :: forall e. Aff (fs :: FS | e) (Either ForeignError Config)
+getConfig :: forall e. Aff (fs :: FS | e) (F Config)
 getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
 
 sendMessage' :: forall e.
@@ -88,7 +90,7 @@ sendMessage' :: forall e.
 sendMessage' bot {id, output, origin} = do
   case origin of
     Timer ->
-      case indexOf "nothing new to download" output of
+      case indexOf (Pattern "nothing new to download") output of
         Just _ -> log "timer found nothing"
         _ -> send
     _ -> send
@@ -129,7 +131,7 @@ addMessagesListener' :: forall e.
     )
     (Stream Int)
 addMessagesListener' bot = do
-  let pattern = unsafePartial $ fromRight $ regex "^get$" $ noFlags {ignoreCase = true}
+  let pattern = unsafePartial $ fromRight $ regex "^get$" ignoreCase
   create
     { start: \l -> do
         addMessagesListener bot pattern \m s -> do
@@ -142,9 +144,9 @@ main :: forall e.
     (MyEffects (err :: EXCEPTION | e))
     (Canceler (MyEffects e))
 main = launchAff $ do
-  config <- getConfig
+  config <- runExcept <$> getConfig
   case config of
-    Left e -> liftEff' $ log "config.json is malformed. closing."
+    Left e -> liftEff' $ log $ "config.json is malformed: " <> show e
     Right {token, torscraperPath, master} -> do
       bot <- liftEff $ connect token
       requests <- liftEff $ map {id: _, origin: User} <$> addMessagesListener' bot
