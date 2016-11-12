@@ -1,8 +1,10 @@
 module Main where
 
 import Prelude
+import TelegramBot as TB
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Canceler, Aff, liftEff', launchAff, makeAff)
+import Control.Monad.Aff (Canceler, Aff, launchAff, makeAff)
+import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
@@ -10,7 +12,7 @@ import Control.Monad.Eff.Exception (try, message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
 import Control.Monad.Except (runExcept)
-import Control.XStream (Stream, STREAM, addListener, fromAff, switchMapEff, periodic, create)
+import Control.XStream (switchMapEff, Stream, STREAM, addListener, fromAff, periodic, create)
 import Data.Either (fromRight, Either(Right, Left))
 import Data.Foreign (F, parseJSON)
 import Data.Foreign.Class (readProp)
@@ -24,7 +26,7 @@ import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
-import TelegramBot (TELEGRAM, Bot, connect, addMessagesListener, sendMessage)
+import TelegramBot (onMessage, Message(Message), sendMessage, onText, TELEGRAM, Bot, connect)
 
 type FilePath = String
 
@@ -35,6 +37,7 @@ type Id = Int
 type Config =
   { token :: Token
   , torscraperPath :: FilePath
+  , lastTrainHomePath :: FilePath
   , master :: Id
   }
 
@@ -45,6 +48,12 @@ data RequestOrigin
 type Request =
   { origin :: RequestOrigin
   , id :: Id
+  }
+
+type RequestWithOrigin =
+  { origin :: RequestOrigin
+  , id :: Id
+  , location :: TB.Location
   }
 
 type Result =
@@ -69,11 +78,13 @@ parseConfig json = do
   value <- parseJSON json
   token <- readProp "token" value
   torscraperPath <- readProp "torscraperPath" value
+  lastTrainHomePath <- readProp "lastTrainHomePath" value
   master <- readProp "master" value
   pure
-    { token: token
-    , torscraperPath: torscraperPath
-    , master: master
+    { token
+    , torscraperPath
+    , lastTrainHomePath
+    , master
     }
 
 getConfig :: forall e. Aff (fs :: FS | e) (F Config)
@@ -122,7 +133,30 @@ runTorscraper path request = makeAff \e s -> do
         s { id: request.id, origin: request.origin, output: output }
     Left err -> e err
 
-addMessagesListener' :: forall e.
+runLastTrainHome :: forall e.
+  String ->
+  RequestWithOrigin ->
+  Aff
+    ( ref :: REF
+    , cp :: CHILD_PROCESS
+    | e
+    )
+    Result
+runLastTrainHome path request@{location: TB.Location {latitude, longitude}} = makeAff \e s -> do
+  ref <- newRef ""
+  process <- spawn "last-train-home" ["--lat", show latitude, "--lon", show longitude] $
+    defaultSpawnOptions { cwd = Just path }
+  result <- try $ onDataString (stdout process) UTF8 \string ->
+    modifyRef ref $ append string
+  case result of
+    Right _ -> do
+      onError process $ toStandardError >>> e
+      onExit process \exit -> do
+        output <- readRef ref
+        s { id: request.id, origin: request.origin, output: output }
+    Left err -> e err
+
+onText' :: forall e.
   Bot ->
   Eff
     ( stream :: STREAM
@@ -130,12 +164,34 @@ addMessagesListener' :: forall e.
     | e
     )
     (Stream Int)
-addMessagesListener' bot = do
+onText' bot = do
   let pattern = unsafePartial $ fromRight $ regex "^get$" ignoreCase
   create
     { start: \l -> do
-        addMessagesListener bot pattern \m s -> do
-          l.next m.from.id
+        onText bot pattern \m s -> do
+          case runExcept m of
+            Right (Message {from: Just (TB.User user)}) -> do
+              l.next user.id
+            _ -> pure unit
+    , stop: const $ pure unit
+    }
+
+onMessage' :: forall e.
+  Bot ->
+  Eff
+    ( stream :: STREAM
+    , telegram :: TELEGRAM
+    | e
+    )
+    (Stream TB.Location)
+onMessage' bot = do
+  create
+    { start: \l -> do
+         onMessage bot \m -> do
+           case runExcept m of
+             Right (Message {location: Just x}) -> do
+               l.next x
+             _ -> pure unit
     , stop: const $ pure unit
     }
 
@@ -146,18 +202,25 @@ main :: forall e.
 main = launchAff $ do
   config <- runExcept <$> getConfig
   case config of
-    Left e -> liftEff' $ log $ "config.json is malformed: " <> show e
-    Right {token, torscraperPath, master} -> do
-      bot <- liftEff $ connect token
-      requests <- liftEff $ map {id: _, origin: User} <$> addMessagesListener' bot
+    Left e ->
+      AffC.log $ "config.json is malformed: " <> show e
+    Right config' ->
+      liftEff $ setupBot config'
+  where
+    setupBot {token, torscraperPath, lastTrainHomePath, master} = do
+      bot <- connect token
+      requests <- map {id: _, origin: User} <$> onText' bot
       let timerRequest = {id: master, origin: Timer}
-      timer <- liftEff $ periodic (60 * 60 * 1000)
+      timer <- periodic (60 * 60 * 1000)
       let timer' = const timerRequest <$> timer
-      results <- liftEff $ (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
+      results <- (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
         fromAff $ runTorscraper torscraperPath request
-      liftEff' $ addListener
+      routeRequests <- map {id: master, origin: User, location: _} <$> onMessage' bot
+      routes <- routeRequests `switchMapEff` \x ->
+        fromAff $ runLastTrainHome lastTrainHomePath x
+      addListener
         { next: sendMessage' bot
         , error: message >>> log
         , complete: const $ pure unit
         }
-        results
+        (results <|> routes)
