@@ -1,10 +1,10 @@
 module Main where
 
 import Prelude
+import Control.Monad.Aff.Console as AffC
 import TelegramBot as TB
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Canceler, Aff, launchAff, makeAff)
-import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
@@ -15,7 +15,9 @@ import Control.Monad.Except (runExcept)
 import Control.XStream (switchMapEff, Stream, STREAM, addListener, fromAff, periodic, create)
 import Data.Either (fromRight, Either(Right, Left))
 import Data.Foreign (F, parseJSON)
-import Data.Foreign.Class (readProp)
+import Data.Foreign.Class (read, class IsForeign)
+import Data.Foreign.Generic (defaultOptions, readGeneric)
+import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(Just))
 import Data.String (Pattern(Pattern), indexOf)
 import Data.String.Regex (regex)
@@ -34,12 +36,15 @@ type Token = String
 
 type Id = Int
 
-type Config =
-  { token :: Token
-  , torscraperPath :: FilePath
-  , lastTrainHomePath :: FilePath
-  , master :: Id
+newtype Config = Config
+  { token :: String
+  , torscraperPath :: String
+  , lastTrainHomePath :: String
+  , master :: Int
   }
+derive instance genericConfig :: Generic Config _
+instance isForeignConfig :: IsForeign Config where
+  read x = readGeneric (defaultOptions {unwrapSingleConstructors = true}) x
 
 data RequestOrigin
   = User
@@ -73,22 +78,8 @@ type MyEffects e =
   | e
   )
 
-parseConfig :: String -> F Config
-parseConfig json = do
-  value <- parseJSON json
-  token <- readProp "token" value
-  torscraperPath <- readProp "torscraperPath" value
-  lastTrainHomePath <- readProp "lastTrainHomePath" value
-  master <- readProp "master" value
-  pure
-    { token
-    , torscraperPath
-    , lastTrainHomePath
-    , master
-    }
-
 getConfig :: forall e. Aff (fs :: FS | e) (F Config)
-getConfig = parseConfig <$> readTextFile UTF8 "./config.json"
+getConfig = (read <=< parseJSON) <$> readTextFile UTF8 "./config.json"
 
 sendMessage' :: forall e.
   Bot ->
@@ -207,7 +198,7 @@ main = launchAff $ do
     Right config' ->
       liftEff $ setupBot config'
   where
-    setupBot {token, torscraperPath, lastTrainHomePath, master} = do
+    setupBot (Config {token, torscraperPath, lastTrainHomePath, master}) = do
       bot <- connect token
       requests <- map {id: _, origin: User} <$> onText' bot
       let timerRequest = {id: master, origin: Timer}

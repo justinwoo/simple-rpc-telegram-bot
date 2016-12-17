@@ -10,7 +10,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "node-telegram-bot-api": "^0.21.1",
-    "xstream": "^6.3.0"
+    "node-telegram-bot-api": "^0.24.0",
+    "xstream": "^9.2.0"
   }
 }
