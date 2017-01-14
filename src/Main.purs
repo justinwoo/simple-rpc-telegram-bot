@@ -17,6 +17,7 @@ import Data.Either (fromRight, Either(Right, Left))
 import Data.Foreign (F, parseJSON)
 import Data.Foreign.Class (read, class IsForeign)
 import Data.Foreign.Generic (defaultOptions, readGeneric)
+import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(Just))
 import Data.String (Pattern(Pattern), indexOf)
@@ -161,7 +162,7 @@ onText' bot = do
     { start: \l -> do
         onText bot pattern \m s -> do
           case runExcept m of
-            Right (Message {from: Just (TB.User user)}) -> do
+            Right (Message {from: NullOrUndefined (Just (TB.User user))}) -> do
               l.next user.id
             _ -> pure unit
     , stop: const $ pure unit
@@ -180,7 +181,7 @@ onMessage' bot = do
     { start: \l -> do
          onMessage bot \m -> do
            case runExcept m of
-             Right (Message {location: Just x}) -> do
+             Right (Message {location: NullOrUndefined (Just x)}) -> do
                l.next x
              _ -> pure unit
     , stop: const $ pure unit
