@@ -11,7 +11,7 @@
     "output"
   ],
   "dependencies": {
-    "purescript-xstream": "^0.7.0",
+    "purescript-xstream": "^0.8.0",
     "purescript-node-telegram-bot-api": "^0.4.0",
     "purescript-foreign": "^3.0.1",
     "purescript-node-child-process": "^3.0.1",
