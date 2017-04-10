@@ -4,6 +4,7 @@ import Prelude
 import Control.Monad.Aff.Console as AffC
 import TelegramBot as TB
 import Control.Alt ((<|>))
+import Control.Cycle (run)
 import Control.Monad.Aff (Canceler, Aff, launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -12,17 +13,19 @@ import Control.Monad.Eff.Exception (try, message, EXCEPTION)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
 import Control.Monad.Except (runExcept)
-import Control.XStream (switchMapEff, Stream, STREAM, addListener, fromAff, periodic, create)
+import Control.XStream (STREAM, Stream, addListener, create, defaultListener, fromAff, periodic, switchMapEff)
 import Data.Either (fromRight, Either(Right, Left))
-import Data.Foreign (F, parseJSON)
-import Data.Foreign.Class (read, class IsForeign)
-import Data.Foreign.Generic (defaultOptions, readGeneric)
+import Data.Foreign (F)
+import Data.Foreign.Class (class Decode)
+import Data.Foreign.Generic (decodeJSON, defaultOptions, genericDecode)
 import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(Just))
+import Data.Monoid (mempty)
 import Data.String (Pattern(Pattern), indexOf)
 import Data.String.Regex (regex)
 import Data.String.Regex.Flags (ignoreCase)
+import Data.Tuple (Tuple(..))
 import Node.ChildProcess (CHILD_PROCESS, onExit, toStandardError, onError, stdout, defaultSpawnOptions, spawn)
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
@@ -44,8 +47,20 @@ newtype Config = Config
   , master :: Int
   }
 derive instance genericConfig :: Generic Config _
-instance isForeignConfig :: IsForeign Config where
-  read x = readGeneric (defaultOptions {unwrapSingleConstructors = true}) x
+instance decodeConfig :: Decode Config where
+  decode x = genericDecode (defaultOptions {unwrapSingleConstructors = true}) x
+
+data Query
+  = ScrapeRequest
+  | TimerRequest
+  | LastTrainRequest RequestWithOrigin
+  | QueueMessage Result
+
+data Command
+  = ScrapeCommand RequestOrigin
+  | LastTrainCommand RequestWithOrigin
+  | SendMessage Result
+  | Info String
 
 data RequestOrigin
   = User
@@ -80,27 +95,17 @@ type MyEffects e =
   )
 
 getConfig :: forall e. Aff (fs :: FS | e) (F Config)
-getConfig = (read <=< parseJSON) <$> readTextFile UTF8 "./config.json"
+getConfig = decodeJSON <$> readTextFile UTF8 "./config.json"
 
 sendMessage' :: forall e.
   Bot ->
   Result ->
   Eff
     ( telegram :: TELEGRAM
-    , console :: CONSOLE
     | e
     ) Unit
-sendMessage' bot {id, output, origin} = do
-  case origin of
-    Timer ->
-      case indexOf (Pattern "nothing new to download") output of
-        Just _ -> log "timer found nothing"
-        _ -> send
-    _ -> send
-  where
-    send = do
-      log output
-      sendMessage bot id output
+sendMessage' bot {id, output} = do
+  sendMessage bot id output
 
 runTorscraper :: forall e.
   String ->
@@ -148,7 +153,7 @@ runLastTrainHome path request@{location: TB.Location {latitude, longitude}} = ma
         s { id: request.id, origin: request.origin, output: output }
     Left err -> e err
 
-onText' :: forall e.
+getMessages :: forall e.
   Bot ->
   Eff
     ( stream :: STREAM
@@ -156,7 +161,7 @@ onText' :: forall e.
     | e
     )
     (Stream Int)
-onText' bot = do
+getMessages bot = do
   let pattern = unsafePartial $ fromRight $ regex "^get$" ignoreCase
   create
     { start: \l -> do
@@ -168,15 +173,16 @@ onText' bot = do
     , stop: const $ pure unit
     }
 
-onMessage' :: forall e.
+locationMessages :: forall e.
   Bot ->
   Eff
     ( stream :: STREAM
     , telegram :: TELEGRAM
+    , console :: CONSOLE
     | e
     )
     (Stream TB.Location)
-onMessage' bot = do
+locationMessages bot = do
   create
     { start: \l -> do
          onMessage bot \m -> do
@@ -187,32 +193,81 @@ onMessage' bot = do
     , stop: const $ pure unit
     }
 
+main_ :: Stream Query -> Stream Command
+main_ queries = inner <$> queries
+  where
+    inner = case _ of
+      TimerRequest -> ScrapeCommand Timer
+      ScrapeRequest -> ScrapeCommand User
+      LastTrainRequest req -> LastTrainCommand req
+      QueueMessage result@{origin, output} -> do
+        case Tuple origin (indexOf (Pattern "nothing new to download") output) of
+          Tuple Timer (Just _) ->
+            Info "timer found nothing"
+          _ ->
+            SendMessage result
+
+driver :: forall e. Config -> Stream Command -> Eff (MyEffects e) (Stream Query)
+driver
+  (Config
+    { token
+    , torscraperPath
+    , lastTrainHomePath
+    , master
+    }
+  )
+  commands = do
+    bot <- connect token
+    timer <- periodic (60 * 60 * 1000)
+    scrapeRequests <- getMessages bot
+    lastTrainRequests <- locationMessages bot
+
+    -- run torscraper
+    scrapeResults <- (scrapeCommands <|> pure Timer) `switchMapEff` \origin ->
+      fromAff $ runTorscraper torscraperPath {origin, id: master}
+
+    -- run last-train-home
+    routes <- routeCommands `switchMapEff` \x ->
+      fromAff $ runLastTrainHome lastTrainHomePath x
+
+    -- print out all commands
+    addListener defaultListener commands
+
+    -- send messages to my bot with the results of scraping and routes
+    addListener
+      { next: sendMessage' bot
+      , error: message >>> log
+      , complete: const $ pure unit
+      }
+      messages
+
+    -- gather all of my queries
+    pure
+      $ const TimerRequest <$> timer
+      <|> const ScrapeRequest <$> scrapeRequests
+      <|> LastTrainRequest <<< {id: master, origin: User, location: _} <$> lastTrainRequests
+      <|> QueueMessage <$> (scrapeResults <|> routes)
+
+    where
+      scrapeCommands = commands >>= case _ of
+        ScrapeCommand origin -> pure origin
+        _ -> mempty
+      routeCommands = commands >>= case _ of
+        LastTrainCommand location -> pure location
+        _ -> mempty
+      messages = commands >>= case _ of
+        SendMessage result -> pure result
+        _ -> mempty
+
+
 main :: forall e.
   Eff
-    (MyEffects (err :: EXCEPTION | e))
+    (MyEffects (exception :: EXCEPTION | e))
     (Canceler (MyEffects e))
 main = launchAff $ do
-  config <- runExcept <$> getConfig
-  case config of
+  runExcept <$> getConfig >>=
+  case _ of
     Left e ->
       AffC.log $ "config.json is malformed: " <> show e
-    Right config' ->
-      liftEff $ setupBot config'
-  where
-    setupBot (Config {token, torscraperPath, lastTrainHomePath, master}) = do
-      bot <- connect token
-      requests <- map {id: _, origin: User} <$> onText' bot
-      let timerRequest = {id: master, origin: Timer}
-      timer <- periodic (60 * 60 * 1000)
-      let timer' = const timerRequest <$> timer
-      results <- (requests <|> timer' <|> pure timerRequest) `switchMapEff` \request ->
-        fromAff $ runTorscraper torscraperPath request
-      routeRequests <- map {id: master, origin: User, location: _} <$> onMessage' bot
-      routes <- routeRequests `switchMapEff` \x ->
-        fromAff $ runLastTrainHome lastTrainHomePath x
-      addListener
-        { next: sendMessage' bot
-        , error: message >>> log
-        , complete: const $ pure unit
-        }
-        (results <|> routes)
+    Right config ->
+      liftEff <<< void $ run main_ (driver config)

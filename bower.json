@@ -11,11 +11,11 @@
     "output"
   ],
   "dependencies": {
-    "purescript-xstream": "^0.8.0",
-    "purescript-node-telegram-bot-api": "^0.4.0",
-    "purescript-foreign": "^3.0.1",
-    "purescript-node-child-process": "^3.0.1",
-    "purescript-foreign-generic": "^3.0.0",
-    "purescript-generics-rep": "^4.1.0"
+    "purescript-xstream": "^0.9.0",
+    "purescript-foreign": "^4.0.0",
+    "purescript-node-child-process": "^4.0.0",
+    "purescript-generics-rep": "^5.0.0",
+    "purescript-cycle-run": "^0.6.0",
+    "purescript-node-telegram-bot-api": "57e0ca7"
   }
 }
