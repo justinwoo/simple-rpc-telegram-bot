@@ -8,18 +8,19 @@ import Control.Cycle (run)
 import Control.Monad.Aff (Canceler, Aff, launchAff, makeAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
-import Control.Monad.Eff.Exception (try, message, EXCEPTION)
+import Control.Monad.Eff.Console (CONSOLE, logShow)
+import Control.Monad.Eff.Exception (EXCEPTION, try)
 import Control.Monad.Eff.Ref (readRef, modifyRef, newRef, REF)
 import Control.Monad.Eff.Timer (TIMER)
 import Control.Monad.Except (runExcept)
-import Control.XStream (STREAM, Stream, addListener, create, defaultListener, fromAff, periodic, switchMapEff)
+import Control.XStream (STREAM, Stream, create, fromAff, periodic, switchMapEff)
 import Data.Either (fromRight, Either(Right, Left))
 import Data.Foreign (F)
 import Data.Foreign.Class (class Decode)
 import Data.Foreign.Generic (decodeJSON, defaultOptions, genericDecode)
 import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(Just))
 import Data.Monoid (mempty)
 import Data.String (Pattern(Pattern), indexOf)
@@ -61,10 +62,16 @@ data Command
   | LastTrainCommand RequestWithOrigin
   | SendMessage Result
   | Info String
+derive instance genericCommand :: Generic Command _
+instance showCommand :: Show Command where
+  show = genericShow
 
 data RequestOrigin
   = User
   | Timer
+derive instance genericRequestOrigin :: Generic RequestOrigin _
+instance showRequestOrigin :: Show RequestOrigin where
+  show = genericShow
 
 type Request =
   { origin :: RequestOrigin
@@ -222,43 +229,25 @@ driver
     scrapeRequests <- getMessages bot
     lastTrainRequests <- locationMessages bot
 
-    -- run torscraper
-    scrapeResults <- (scrapeCommands <|> pure Timer) `switchMapEff` \origin ->
-      fromAff $ runTorscraper torscraperPath {origin, id: master}
-
-    -- run last-train-home
-    routes <- routeCommands `switchMapEff` \x ->
-      fromAff $ runLastTrainHome lastTrainHomePath x
-
-    -- print out all commands
-    addListener defaultListener commands
-
-    -- send messages to my bot with the results of scraping and routes
-    addListener
-      { next: sendMessage' bot
-      , error: message >>> log
-      , complete: const $ pure unit
-      }
-      messages
+    -- run torscraper and last-train-home
+    results <- (commands <|> pure (ScrapeCommand Timer)) `switchMapEff` \command -> do
+      _ <- logShow command
+      case command of
+        ScrapeCommand origin ->
+          fromAff $ runTorscraper torscraperPath {origin, id: master}
+        LastTrainCommand location ->
+          fromAff $ runLastTrainHome lastTrainHomePath location
+        SendMessage result -> do
+          _ <- sendMessage' bot result
+          pure mempty
+        _ -> pure mempty
 
     -- gather all of my queries
     pure
-      $ const TimerRequest <$> timer
-      <|> const ScrapeRequest <$> scrapeRequests
+      $ TimerRequest <$ timer
+      <|> ScrapeRequest <$ scrapeRequests
       <|> LastTrainRequest <<< {id: master, origin: User, location: _} <$> lastTrainRequests
-      <|> QueueMessage <$> (scrapeResults <|> routes)
-
-    where
-      scrapeCommands = commands >>= case _ of
-        ScrapeCommand origin -> pure origin
-        _ -> mempty
-      routeCommands = commands >>= case _ of
-        LastTrainCommand location -> pure location
-        _ -> mempty
-      messages = commands >>= case _ of
-        SendMessage result -> pure result
-        _ -> mempty
-
+      <|> QueueMessage <$> results
 
 main :: forall e.
   Eff
