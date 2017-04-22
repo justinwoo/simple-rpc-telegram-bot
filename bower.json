@@ -15,7 +15,7 @@
     "purescript-foreign": "^4.0.0",
     "purescript-node-child-process": "^4.0.0",
     "purescript-generics-rep": "^5.0.0",
-    "purescript-cycle-run": "^0.6.0",
+    "purescript-cycle-run": "^0.7.0",
     "purescript-node-telegram-bot-api": "57e0ca7"
   }
 }
