@@ -123,19 +123,12 @@ runTorscraper :: forall e.
     | e
     )
     Result
-runTorscraper path request = makeAff \e s -> do
-  ref <- newRef ""
-  process <- spawn "node" ["index.js"] $
-    defaultSpawnOptions { cwd = Just path }
-  result <- try $ onDataString (stdout process) UTF8 \string ->
-    modifyRef ref $ append string
-  case result of
-    Right _ -> do
-      onError process $ toStandardError >>> e
-      onExit process \exit -> do
-        output <- readRef ref
-        s { id: request.id, origin: request.origin, output: output }
-    Left err -> e err
+runTorscraper path request =
+  runProgram
+    "node"
+    ["index.js"]
+    path
+    { id: request.id, origin: request.origin, output: _ }
 
 runLastTrainHome :: forall e.
   String ->
@@ -146,18 +139,36 @@ runLastTrainHome :: forall e.
     | e
     )
     Result
-runLastTrainHome path request@{location: TB.Location {latitude, longitude}} = makeAff \e s -> do
+runLastTrainHome path request@{location: TB.Location {latitude, longitude}} =
+  runProgram
+    "last-train-home"
+    ["--lat", show latitude, "--lon", show longitude]
+    path
+    { id: request.id, origin: request.origin, output: _ }
+
+runProgram :: forall e a.
+  String
+  -> Array String
+  -> String
+  -> (String -> a)
+  -> Aff
+      ( ref :: REF
+      , cp :: CHILD_PROCESS
+      | e
+      )
+      a
+runProgram cmd args path format = makeAff \e s -> do
   ref <- newRef ""
-  process <- spawn "last-train-home" ["--lat", show latitude, "--lon", show longitude] $
+  process <- spawn cmd args $
     defaultSpawnOptions { cwd = Just path }
   result <- try $ onDataString (stdout process) UTF8 \string ->
-    modifyRef ref $ append string
+    modifyRef ref $ (_ <> string)
   case result of
     Right _ -> do
       onError process $ toStandardError >>> e
       onExit process \exit -> do
         output <- readRef ref
-        s { id: request.id, origin: request.origin, output: output }
+        s $ format output
     Left err -> e err
 
 getMessages :: forall e.
