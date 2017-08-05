@@ -20,6 +20,7 @@ import Data.Foreign (F)
 import Data.Maybe (Maybe(Just))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
+import Data.Record (insert)
 import Data.String.Regex (regex)
 import Data.String.Regex.Flags (ignoreCase)
 import FRP (FRP)
@@ -33,6 +34,7 @@ import Partial.Unsafe (unsafePartial)
 import Simple.JSON (class ReadForeign, readJSON)
 import TelegramBot (Bot, Message(..), TELEGRAM, connect, onText, sendMessage)
 import TelegramBot as TB
+import Type.Prelude (SProxy(..))
 
 newtype FilePath = FilePath String
 derive instance ntFP :: Newtype FilePath _
@@ -76,7 +78,10 @@ runTorscraper path request =
     "node"
     ["index.js"]
     (unwrap path)
-    { id: request.id, origin: request.origin, output: _ }
+    handler
+  where
+    handler o =
+      insert (SProxy :: SProxy "output") o request
 
 runProgram :: forall a. String -> Array String -> String -> (String -> a) -> IO a
 runProgram cmd args path format = liftAff $ makeAff \e s -> do
