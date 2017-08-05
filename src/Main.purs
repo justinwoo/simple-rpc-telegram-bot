@@ -32,8 +32,7 @@ import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (class ReadForeign, readJSON)
-import TelegramBot (Bot, Message(..), TELEGRAM, connect, onText, sendMessage)
-import TelegramBot as TB
+import TelegramBot (Bot, Message(..), TELEGRAM, User(..), connect, onText, sendMessage)
 import Type.Prelude (SProxy(..))
 
 newtype FilePath = FilePath String
@@ -55,8 +54,8 @@ type Config =
   }
 
 data RequestOrigin
-  = User
-  | Timer
+  = FromUser
+  | FromTimer
 
 type Request =
   { origin :: RequestOrigin
@@ -109,7 +108,7 @@ getMessages bot = liftEff do
       | Right message <- runExcept m
       , Message {from} <- message
       , Just user <- unwrap from
-      , TB.User {id} <- user
+      , User {id} <- user
         = push id
       | otherwise
         = pure unit
@@ -169,11 +168,11 @@ drivers
       connection <- connect' $ unwrap token
       subscribe' results $ sendMessage' connection
       messages <- getMessages connection
-      pure $ { origin: User, id: master } <$ messages
+      pure $ { origin: FromUser, id: master } <$ messages
 
     timer _
       | tick <- pure 0 <|> interval (60 * 60 * 1000)
-      , reqs <- { origin: Timer, id: master } <$ tick
+      , reqs <- { origin: FromTimer, id: master } <$ tick
       = pure reqs
 
 main :: IOSync Unit
