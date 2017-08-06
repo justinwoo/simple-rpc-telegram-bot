@@ -4,17 +4,15 @@ import Prelude
 
 import ChocoPie (runChocoPie)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, launchAff, makeAff)
+import Control.Monad.Aff (Aff, attempt, makeAff, runAff)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Aff.Console (CONSOLE)
 import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Exception (EXCEPTION, try)
+import Control.Monad.Eff.Exception (try)
 import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
-import Control.Monad.IO (INFINITY)
-import Control.Monad.IOSync (runIOSync')
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (F)
 import Data.Maybe (Maybe(Just))
@@ -156,15 +154,20 @@ handleTorscraper :: forall e
   -> (Result -> Eff (ref :: REF, cp :: CHILD_PROCESS | e) Unit)
   -> Request
   -> Eff
-       ( exception :: EXCEPTION
-       , ref :: REF
+       ( ref :: REF
        , cp :: CHILD_PROCESS
        | e
        )
        Unit
-handleTorscraper torscraperPath master push {origin} = void $ launchAff do
-  result <- runTorscraper torscraperPath {origin, id: master}
-  liftEff $ push result
+handleTorscraper torscraperPath master push request@{origin} = yoloAff do
+  result <- attempt $ runTorscraper torscraperPath {origin, id: master}
+  liftEff case result of
+    Right x -> push x
+    Left e -> push $ insert (SProxy :: SProxy "output") ("error: " <> show e) request
+
+yoloAff :: forall a e. Aff e a -> Eff e Unit
+yoloAff aff =
+  unit <$ runAff (const $ pure unit) (const $ pure unit) aff
 
 type Main
    = { torscraper :: Event Result
@@ -190,7 +193,6 @@ drivers :: forall e1 e2 e3
               ( frp :: FRP
               , cp :: CHILD_PROCESS
               , ref :: REF
-              , infinity :: INFINITY
               | e1
               )
               (Event Result)
@@ -219,7 +221,7 @@ drivers
   where
     torscraper requests = do
       { event, push } <- create
-      runIOSync' <<< liftEff $ subscribe requests $ handleTorscraper torscraperPath master push
+      subscribe requests $ handleTorscraper torscraperPath master push
       pure event
 
     bot results = do
@@ -239,7 +241,6 @@ main :: forall e.
     , console :: CONSOLE
     , frp :: FRP
     , cp :: CHILD_PROCESS
-    , infinity :: INFINITY
     , ref :: REF
     , telegram :: TELEGRAM
     | e
