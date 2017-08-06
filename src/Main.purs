@@ -4,17 +4,17 @@ import Prelude
 
 import ChocoPie (runChocoPie)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (makeAff)
+import Control.Monad.Aff (Aff, launchAff, makeAff)
 import Control.Monad.Aff.Class (liftAff)
+import Control.Monad.Aff.Console (CONSOLE)
 import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console as EffC
-import Control.Monad.Eff.Exception (try)
-import Control.Monad.Eff.Ref (modifyRef, newRef, readRef)
+import Control.Monad.Eff.Exception (EXCEPTION, try)
+import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
-import Control.Monad.IO (INFINITY, IO, launchIO)
-import Control.Monad.IOSync (IOSync, runIOSync')
+import Control.Monad.IO (INFINITY)
+import Control.Monad.IOSync (runIOSync')
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (F)
 import Data.Maybe (Maybe(Just))
@@ -26,8 +26,9 @@ import Data.String.Regex.Flags (ignoreCase)
 import FRP (FRP)
 import FRP.Event (Event, create, subscribe)
 import FRP.Event.Time (interval)
-import Node.ChildProcess (defaultSpawnOptions, onError, onExit, spawn, stdout, toStandardError)
+import Node.ChildProcess (CHILD_PROCESS, defaultSpawnOptions, onError, onExit, spawn, stdout, toStandardError)
 import Node.Encoding (Encoding(UTF8))
+import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
@@ -68,10 +69,18 @@ type Result =
   , origin :: RequestOrigin
   }
 
-getConfig :: IO (F Config)
-getConfig = liftAff $ readJSON <$> readTextFile UTF8 "./config.json"
+getConfig :: forall e. Aff (fs :: FS | e) (F Config)
+getConfig = readJSON <$> readTextFile UTF8 "./config.json"
 
-runTorscraper :: FilePath -> Request -> IO Result
+runTorscraper :: forall e
+   . FilePath
+  -> Request
+  -> Aff
+       ( ref :: REF
+       , cp :: CHILD_PROCESS
+       | e
+       )
+       Result
 runTorscraper path request =
   runProgram
     "node"
@@ -82,7 +91,17 @@ runTorscraper path request =
     handler o =
       insert (SProxy :: SProxy "output") o request
 
-runProgram :: forall a. String -> Array String -> String -> (String -> a) -> IO a
+runProgram :: forall a e
+   . String
+   -> Array String
+   -> String
+   -> (String -> a)
+   -> Aff
+       ( ref :: REF
+       , cp :: CHILD_PROCESS
+       | e
+       )
+       a
 runProgram cmd args path format = liftAff $ makeAff \e s -> do
   ref <- newRef ""
   process <- spawn cmd args $
@@ -97,8 +116,15 @@ runProgram cmd args path format = liftAff $ makeAff \e s -> do
         s $ format output
     Left err -> e err
 
-getMessages :: Bot -> IOSync (Event Int)
-getMessages bot = liftEff do
+getMessages :: forall e
+   . Bot
+  -> Eff
+       ( frp :: FRP
+       , telegram :: TELEGRAM
+       | e
+       )
+       (Event Int)
+getMessages bot = do
   let pattern = unsafePartial $ fromRight $ regex "^get$" ignoreCase
   { event, push } <- create
   onText bot pattern $ handler push
@@ -113,15 +139,32 @@ getMessages bot = liftEff do
       | otherwise
         = pure unit
 
-connect' :: String -> IOSync Bot
-connect' = liftEff <<< connect
-
-subscribe' :: forall a e. Event a -> (a -> Eff (frp :: FRP | e) Unit) -> IOSync Unit
-subscribe' a b = liftEff $ subscribe a b
-
-sendMessage' :: forall e. Bot -> Result -> Eff (telegram :: TELEGRAM | e) Unit
+sendMessage' :: forall e
+   . Bot
+   -> Result
+   -> Eff
+        ( telegram :: TELEGRAM
+        | e
+        )
+        Unit
 sendMessage' connection {id, output} = do
   sendMessage connection (unwrap id) output
+
+handleTorscraper :: forall e
+   . FilePath
+  -> Id
+  -> (Result -> Eff (ref :: REF, cp :: CHILD_PROCESS | e) Unit)
+  -> Request
+  -> Eff
+       ( exception :: EXCEPTION
+       , ref :: REF
+       , cp :: CHILD_PROCESS
+       | e
+       )
+       Unit
+handleTorscraper torscraperPath master push {origin} = void $ launchAff do
+  result <- runTorscraper torscraperPath {origin, id: master}
+  liftEff $ push result
 
 type Main
    = { torscraper :: Event Result
@@ -139,13 +182,31 @@ main' sources =
   , timer: mempty
   }
 
-type Drivers e =
-  { torscraper :: Event Request -> Eff e (Event Result)
-  , bot :: Event Result -> Eff e (Event Request)
-  , timer :: Event Unit -> Eff e (Event Request)
-  }
-
-drivers :: forall e. Config -> Drivers (infinity :: INFINITY | e)
+drivers :: forall e1 e2 e3
+   . Config
+  -> { torscraper
+         :: Event Request
+         -> Eff
+              ( frp :: FRP
+              , cp :: CHILD_PROCESS
+              , ref :: REF
+              , infinity :: INFINITY
+              | e1
+              )
+              (Event Result)
+     , bot
+         :: Event Result
+         -> Eff
+              ( telegram :: TELEGRAM
+              , frp :: FRP
+              | e2
+              )
+              (Event Request)
+     , timer
+         :: Event Unit
+         -> Eff e3
+              (Event Request)
+     }
 drivers
   { token
   , torscraperPath
@@ -156,17 +217,14 @@ drivers
   , timer
   }
   where
-    torscraper requests = runIOSync' do
-      { event, push } <- liftEff $ create
-      subscribe' requests $ handleTorscraper push
+    torscraper requests = do
+      { event, push } <- create
+      runIOSync' <<< liftEff $ subscribe requests $ handleTorscraper torscraperPath master push
       pure event
-    handleTorscraper push {origin} = runIOSync' $ launchIO do
-      result <- runTorscraper torscraperPath {origin, id: master}
-      liftEff $ push result
 
-    bot results = runIOSync' do
-      connection <- connect' $ unwrap token
-      subscribe' results $ sendMessage' connection
+    bot results = do
+      connection <- connect $ unwrap token
+      subscribe results $ sendMessage' connection
       messages <- getMessages connection
       pure $ { origin: FromUser, id: master } <$ messages
 
@@ -175,12 +233,22 @@ drivers
       , reqs <- { origin: FromTimer, id: master } <$ tick
       = pure reqs
 
-main :: IOSync Unit
-main = launchIO do
+main :: forall e.
+  Aff
+    ( fs :: FS
+    , console :: CONSOLE
+    , frp :: FRP
+    , cp :: CHILD_PROCESS
+    , infinity :: INFINITY
+    , ref :: REF
+    , telegram :: TELEGRAM
+    | e
+    )
+    Unit
+main = do
   c <- runExcept <$> getConfig
   case c of
     Left e ->
-      liftAff <<< AffC.log $ "config.json is malformed: " <> show e
-    Right config -> liftEff do
-      EffC.log "running"
-      runChocoPie main' (drivers config)
+      AffC.log $ "config.json is malformed: " <> show e
+    Right config -> do
+      liftEff $ runChocoPie main' (drivers config)
