@@ -7,4 +7,5 @@
 /.psci*
 /src/.webpack.js
 .psc-package
+.psc-ide-port
 package-lock.json

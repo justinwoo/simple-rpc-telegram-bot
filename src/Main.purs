@@ -9,12 +9,11 @@ import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console as EffC
 import Control.Monad.Eff.Exception (try)
 import Control.Monad.Eff.Ref (modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
-import Control.Monad.IO (INFINITY, IO, launchIO)
-import Control.Monad.IOSync (IOSync, runIOSync')
+import Control.Monad.IO (IO, launchIO)
+import Control.Monad.IOSync (IOSync, runIOSync, runIOSync')
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (F)
 import Data.Maybe (Maybe(Just))
@@ -139,13 +138,13 @@ main' sources =
   , timer: mempty
   }
 
-type Drivers e =
-  { torscraper :: Event Request -> Eff e (Event Result)
-  , bot :: Event Result -> Eff e (Event Request)
-  , timer :: Event Unit -> Eff e (Event Request)
+type Drivers =
+  { torscraper :: Event Request -> IOSync (Event Result)
+  , bot :: Event Result -> IOSync (Event Request)
+  , timer :: Event Unit -> IOSync (Event Request)
   }
 
-drivers :: forall e. Config -> Drivers (infinity :: INFINITY | e)
+drivers :: Config -> Drivers
 drivers
   { token
   , torscraperPath
@@ -156,7 +155,7 @@ drivers
   , timer
   }
   where
-    torscraper requests = runIOSync' do
+    torscraper requests = do
       { event, push } <- liftEff $ create
       subscribe' requests $ handleTorscraper push
       pure event
@@ -164,7 +163,7 @@ drivers
       result <- runTorscraper torscraperPath {origin, id: master}
       liftEff $ push result
 
-    bot results = runIOSync' do
+    bot results = do
       connection <- connect' $ unwrap token
       subscribe' results $ sendMessage' connection
       messages <- getMessages connection
@@ -182,5 +181,4 @@ main = launchIO do
     Left e ->
       liftAff <<< AffC.log $ "config.json is malformed: " <> show e
     Right config -> liftEff do
-      EffC.log "running"
-      runChocoPie main' (drivers config)
+      runIOSync $ runChocoPie main' (drivers config)
