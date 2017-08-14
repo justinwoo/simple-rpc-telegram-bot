@@ -15,6 +15,7 @@ import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign (F)
+import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Maybe (Maybe(Just))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
@@ -31,7 +32,7 @@ import Node.FS.Aff (readTextFile)
 import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (class ReadForeign, readJSON)
-import TelegramBot (Bot, Message(..), TELEGRAM, User(..), connect, onText, sendMessage)
+import TelegramBot (Bot, TELEGRAM, connect, onText, sendMessage)
 import Type.Prelude (SProxy(..))
 
 newtype FilePath = FilePath String
@@ -130,10 +131,8 @@ getMessages bot = do
   where
     handler push m _
       | Right message <- runExcept m
-      , Message {from} <- message
-      , Just user <- unwrap from
-      , User {id} <- user
-        = push id
+      , NullOrUndefined (Just user) <- message.from
+        = push user.id
       | otherwise
         = pure unit
 
