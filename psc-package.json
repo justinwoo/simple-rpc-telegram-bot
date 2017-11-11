@@ -1,8 +1,11 @@
 {
     "name": "simple-rpc-telegram-bot",
-    "set": "psc-0.10.2",
-    "source": "https://github.com/purescript/package-sets.git",
+    "set": "karaage",
+    "source": "https://github.com/justinwoo/package-sets.git",
     "depends": [
+        "node-telegram-bot-api",
+        "cycle-run",
+        "typelevel-prelude",
         "refs",
         "node-child-process",
         "foreign",
