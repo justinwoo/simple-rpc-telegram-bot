@@ -1,8 +1,11 @@
 {
     "name": "simple-rpc-telegram-bot",
-    "set": "psc-0.10.2",
-    "source": "https://github.com/purescript/package-sets.git",
+    "set": "dango",
+    "source": "https://github.com/justinwoo/package-sets.git",
     "depends": [
+        "choco-pie",
+        "node-telegram-bot-api",
+        "typelevel-prelude",
         "refs",
         "node-child-process",
         "foreign",

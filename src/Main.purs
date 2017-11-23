@@ -14,7 +14,6 @@ import Control.Monad.Eff.Exception (try)
 import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(Right, Left), fromRight)
-import Data.Foreign (F)
 import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Maybe (Maybe(Just))
 import Data.Monoid (mempty)
@@ -68,9 +67,6 @@ type Result =
   , origin :: RequestOrigin
   }
 
-getConfig :: forall e. Aff (fs :: FS | e) (F Config)
-getConfig = readJSON <$> readTextFile UTF8 "./config.json"
-
 runTorscraper :: forall e
    . FilePath
   -> Request
@@ -101,7 +97,7 @@ runProgram :: forall a e
        | e
        )
        a
-runProgram cmd args path format = liftAff $ makeAff \e s -> do
+runProgram cmd args path format = liftAff $ makeAff \cb -> do
   ref <- newRef ""
   process <- spawn cmd args $
     defaultSpawnOptions { cwd = Just path }
@@ -109,11 +105,12 @@ runProgram cmd args path format = liftAff $ makeAff \e s -> do
     modifyRef ref $ (_ <> string)
   case result of
     Right _ -> do
-      onError process $ toStandardError >>> e
+      onError process $ toStandardError >>> Left >>> cb
       onExit process \exit -> do
         output <- readRef ref
-        s $ format output
-    Left err -> e err
+        cb <<< pure $ format output
+    Left err -> cb $ Left err
+  pure mempty
 
 getMessages :: forall e
    . Bot
@@ -166,7 +163,7 @@ handleTorscraper torscraperPath master push request@{origin} = yoloAff do
 
 yoloAff :: forall a e. Aff e a -> Eff e Unit
 yoloAff aff =
-  unit <$ runAff (const $ pure unit) (const $ pure unit) aff
+  unit <$ runAff (const $ pure unit) aff
 
 type Main
    = { torscraper :: Event Result
@@ -220,12 +217,12 @@ drivers
   where
     torscraper requests = do
       { event, push } <- create
-      subscribe requests $ handleTorscraper torscraperPath master push
+      _ <- subscribe requests $ handleTorscraper torscraperPath master push
       pure event
 
     bot results = do
       connection <- connect $ unwrap token
-      subscribe results $ sendMessage' connection
+      _ <- subscribe results $ sendMessage' connection
       messages <- getMessages connection
       pure $ { origin: FromUser, id: master } <$ messages
 
@@ -246,7 +243,7 @@ main :: forall e.
     )
     Unit
 main = do
-  c <- runExcept <$> getConfig
+  c <- readJSON <$> readTextFile UTF8 "./config.json"
   case c of
     Left e ->
       AffC.log $ "config.json is malformed: " <> show e
