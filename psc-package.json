@@ -1,6 +1,6 @@
 {
     "name": "simple-rpc-telegram-bot",
-    "set": "dango",
+    "set": "persimmon",
     "source": "https://github.com/justinwoo/package-sets.git",
     "depends": [
         "choco-pie",
