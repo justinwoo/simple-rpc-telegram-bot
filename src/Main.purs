@@ -10,6 +10,7 @@ import Control.Monad.Aff.Console (CONSOLE)
 import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (try)
 import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
 import Control.Monad.Except (runExcept)
@@ -138,11 +139,17 @@ sendMessage' :: forall e
    -> Result
    -> Eff
         ( telegram :: TELEGRAM
+        , console :: CONSOLE
         | e
         )
         Unit
-sendMessage' connection {id, output} = do
-  sendMessage connection (unwrap id) output
+sendMessage' connection {id, output, origin} =
+  case origin of
+  FromUser -> do
+    log $ "User: " <> output
+    sendMessage connection (unwrap id) output
+  FromTimer -> do
+    log $ "Timer: " <> output
 
 handleTorscraper :: forall e
    . FilePath
@@ -197,6 +204,7 @@ drivers :: forall e1 e2 e3
          -> Eff
               ( telegram :: TELEGRAM
               , frp :: FRP
+              , console :: CONSOLE
               | e2
               )
               (Event Request)
