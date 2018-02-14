@@ -4,7 +4,7 @@ import Prelude
 
 import ChocoPie (runChocoPie)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, attempt, makeAff, runAff)
+import Control.Monad.Aff (Aff, attempt, launchAff_, makeAff, runAff)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Aff.Console (CONSOLE)
 import Control.Monad.Aff.Console as AffC
@@ -232,7 +232,7 @@ drivers
       = pure reqs
 
 main :: forall e.
-  Aff
+  Eff
     ( fs :: FS
     , console :: CONSOLE
     , frp :: FRP
@@ -242,7 +242,7 @@ main :: forall e.
     | e
     )
     Unit
-main = do
+main = launchAff_ do
   c <- readJSON <$> readTextFile UTF8 "./config.json"
   case c of
     Left e ->
