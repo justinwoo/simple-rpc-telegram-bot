@@ -20,6 +20,7 @@ import Data.Maybe (Maybe(Just))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Record (insert)
+import Data.String (Pattern(..), contains)
 import Data.String.Regex (regex)
 import Data.String.Regex.Flags (ignoreCase)
 import FRP (FRP)
@@ -149,6 +150,9 @@ sendMessage' connection {id, output, origin} =
     log $ "User: " <> output
     sendMessage connection (unwrap id) output
   FromTimer -> do
+    if contains (Pattern "nothing new to download") output
+       then pure unit
+       else sendMessage connection (unwrap id) output
     log $ "Timer: " <> output
 
 handleTorscraper :: forall e
