@@ -1,16 +1,17 @@
 {
-    "name": "simple-rpc-telegram-bot",
-    "set": "persimmon",
-    "source": "https://github.com/justinwoo/package-sets.git",
-    "depends": [
-        "choco-pie",
-        "node-telegram-bot-api",
-        "typelevel-prelude",
-        "refs",
-        "node-child-process",
-        "foreign",
-        "node-fs-aff",
-        "aff",
-        "prelude"
-    ]
+  "name": "simple-rpc-telegram-bot",
+  "set": "kefir",
+  "source": "https://github.com/justinwoo/package-sets.git",
+  "depends": [
+    "sunde",
+    "choco-pie",
+    "node-telegram-bot-api",
+    "typelevel-prelude",
+    "refs",
+    "node-child-process",
+    "foreign",
+    "node-fs-aff",
+    "aff",
+    "prelude"
+  ]
 }

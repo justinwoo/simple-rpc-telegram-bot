@@ -4,15 +4,14 @@ import Prelude
 
 import ChocoPie (runChocoPie)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, attempt, launchAff_, makeAff, runAff)
-import Control.Monad.Aff.Class (liftAff)
+import Control.Monad.Aff (Aff, attempt, launchAff_, runAff)
 import Control.Monad.Aff.Console (CONSOLE)
 import Control.Monad.Aff.Console as AffC
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (try)
-import Control.Monad.Eff.Ref (REF, modifyRef, newRef, readRef)
+import Control.Monad.Eff.Exception (EXCEPTION)
+import Control.Monad.Eff.Ref (REF)
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(Right, Left), fromRight)
 import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
@@ -26,13 +25,13 @@ import Data.String.Regex.Flags (ignoreCase)
 import FRP (FRP)
 import FRP.Event (Event, create, subscribe)
 import FRP.Event.Time (interval)
-import Node.ChildProcess (CHILD_PROCESS, defaultSpawnOptions, onError, onExit, spawn, stdout, toStandardError)
+import Node.ChildProcess as CP
 import Node.Encoding (Encoding(UTF8))
 import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
-import Node.Stream (onDataString)
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (class ReadForeign, readJSON)
+import Sunde as Sunde
 import TelegramBot (Bot, TELEGRAM, connect, onText, sendMessage)
 import Type.Prelude (SProxy(..))
 
@@ -74,45 +73,22 @@ runTorscraper :: forall e
   -> Request
   -> Aff
        ( ref :: REF
-       , cp :: CHILD_PROCESS
+       , cp :: CP.CHILD_PROCESS
+       , exception :: EXCEPTION
        | e
        )
        Result
-runTorscraper path request =
-  runProgram
+runTorscraper path request = do
+  result <- Sunde.spawn
     "node"
     ["index.js"]
-    (unwrap path)
-    handler
+    CP.defaultSpawnOptions { cwd = Just (unwrap path) }
+  pure case result.exit of
+    CP.Normally 0 -> mkResult result.stdout
+    _ -> mkResult $ "error: " <> result.stderr
   where
-    handler o =
+    mkResult o =
       insert (SProxy :: SProxy "output") o request
-
-runProgram :: forall a e
-   . String
-   -> Array String
-   -> String
-   -> (String -> a)
-   -> Aff
-       ( ref :: REF
-       , cp :: CHILD_PROCESS
-       | e
-       )
-       a
-runProgram cmd args path format = liftAff $ makeAff \cb -> do
-  ref <- newRef ""
-  process <- spawn cmd args $
-    defaultSpawnOptions { cwd = Just path }
-  result <- try $ onDataString (stdout process) UTF8 \string ->
-    modifyRef ref $ (_ <> string)
-  case result of
-    Right _ -> do
-      onError process $ toStandardError >>> Left >>> cb
-      onExit process \exit -> do
-        output <- readRef ref
-        cb <<< pure $ format output
-    Left err -> cb $ Left err
-  pure mempty
 
 getMessages :: forall e
    . Bot
@@ -158,11 +134,12 @@ sendMessage' connection {id, output, origin} =
 handleTorscraper :: forall e
    . FilePath
   -> Id
-  -> (Result -> Eff (ref :: REF, cp :: CHILD_PROCESS | e) Unit)
+  -> (Result -> Eff (ref :: REF, cp :: CP.CHILD_PROCESS, exception :: EXCEPTION | e) Unit)
   -> Request
   -> Eff
        ( ref :: REF
-       , cp :: CHILD_PROCESS
+       , cp :: CP.CHILD_PROCESS
+       , exception :: EXCEPTION
        | e
        )
        Unit
@@ -198,8 +175,9 @@ drivers :: forall e1 e2 e3
          :: Event Request
          -> Eff
               ( frp :: FRP
-              , cp :: CHILD_PROCESS
+              , cp :: CP.CHILD_PROCESS
               , ref :: REF
+              , exception :: EXCEPTION
               | e1
               )
               (Event Result)
@@ -208,6 +186,7 @@ drivers :: forall e1 e2 e3
          -> Eff
               ( telegram :: TELEGRAM
               , frp :: FRP
+              , exception :: EXCEPTION
               , console :: CONSOLE
               | e2
               )
@@ -248,7 +227,8 @@ main :: forall e.
     ( fs :: FS
     , console :: CONSOLE
     , frp :: FRP
-    , cp :: CHILD_PROCESS
+    , cp :: CP.CHILD_PROCESS
+    , exception :: EXCEPTION
     , ref :: REF
     , telegram :: TELEGRAM
     | e
