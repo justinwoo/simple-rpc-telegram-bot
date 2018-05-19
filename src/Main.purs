@@ -4,35 +4,26 @@ import Prelude
 
 import ChocoPie (runChocoPie)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, attempt, launchAff_, runAff)
-import Control.Monad.Aff.Console (CONSOLE)
-import Control.Monad.Aff.Console as AffC
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (EXCEPTION)
-import Control.Monad.Eff.Ref (REF)
-import Control.Monad.Except (runExcept)
 import Data.Either (Either(Right, Left), fromRight)
-import Data.Foreign.NullOrUndefined (NullOrUndefined(..))
 import Data.Maybe (Maybe(Just))
-import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
-import Data.Record (insert)
 import Data.String (Pattern(..), contains)
 import Data.String.Regex (regex)
 import Data.String.Regex.Flags (ignoreCase)
-import FRP (FRP)
+import Effect (Effect)
+import Effect.Aff (Aff, attempt, launchAff_)
+import Effect.Class (liftEffect)
+import Effect.Console (log)
 import FRP.Event (Event, create, subscribe)
 import FRP.Event.Time (interval)
 import Node.ChildProcess as CP
 import Node.Encoding (Encoding(UTF8))
-import Node.FS (FS)
 import Node.FS.Aff (readTextFile)
 import Partial.Unsafe (unsafePartial)
+import Record as Record
 import Simple.JSON (class ReadForeign, readJSON)
 import Sunde as Sunde
-import TelegramBot (Bot, TELEGRAM, connect, onText, sendMessage)
+import TelegramBot (Bot, connect, onText, sendMessage)
 import Type.Prelude (SProxy(..))
 
 newtype FilePath = FilePath String
@@ -68,16 +59,7 @@ type Result =
   , origin :: RequestOrigin
   }
 
-runTorscraper :: forall e
-   . FilePath
-  -> Request
-  -> Aff
-       ( ref :: REF
-       , cp :: CP.CHILD_PROCESS
-       , exception :: EXCEPTION
-       | e
-       )
-       Result
+runTorscraper :: FilePath -> Request -> Aff Result
 runTorscraper path request = do
   result <- Sunde.spawn
     "node"
@@ -88,38 +70,19 @@ runTorscraper path request = do
     _ -> mkResult $ "error: " <> result.stderr
   where
     mkResult o =
-      insert (SProxy :: SProxy "output") o request
+      Record.insert (SProxy :: SProxy "output") o request
 
-getMessages :: forall e
-   . Bot
-  -> Eff
-       ( frp :: FRP
-       , telegram :: TELEGRAM
-       | e
-       )
-       (Event Int)
+getMessages :: Bot -> Effect (Event Int)
 getMessages bot = do
   let pattern = unsafePartial $ fromRight $ regex "^get$" ignoreCase
   { event, push } <- create
   onText bot pattern $ handler push
   pure event
   where
-    handler push m _
-      | Right message <- runExcept m
-      , NullOrUndefined (Just user) <- message.from
-        = push user.id
-      | otherwise
-        = pure unit
+    handler push (Right { from: Just user }) _ = push user.id
+    handler push _ _ = pure unit
 
-sendMessage' :: forall e
-   . Bot
-   -> Result
-   -> Eff
-        ( telegram :: TELEGRAM
-        , console :: CONSOLE
-        | e
-        )
-        Unit
+sendMessage' :: Bot -> Result -> Effect Unit
 sendMessage' connection {id, output, origin} =
   case origin of
   FromUser -> do
@@ -131,27 +94,17 @@ sendMessage' connection {id, output, origin} =
        else sendMessage connection (unwrap id) output
     log $ "Timer: " <> output
 
-handleTorscraper :: forall e
-   . FilePath
+handleTorscraper
+  :: FilePath
   -> Id
-  -> (Result -> Eff (ref :: REF, cp :: CP.CHILD_PROCESS, exception :: EXCEPTION | e) Unit)
+  -> (Result -> Effect Unit)
   -> Request
-  -> Eff
-       ( ref :: REF
-       , cp :: CP.CHILD_PROCESS
-       , exception :: EXCEPTION
-       | e
-       )
-       Unit
-handleTorscraper torscraperPath master push request@{origin} = yoloAff do
+  -> Effect Unit
+handleTorscraper torscraperPath master push request@{origin} = launchAff_ do
   result <- attempt $ runTorscraper torscraperPath {origin, id: master}
-  liftEff case result of
+  liftEffect case result of
     Right x -> push x
-    Left e -> push $ insert (SProxy :: SProxy "output") ("error: " <> show e) request
-
-yoloAff :: forall a e. Aff e a -> Eff e Unit
-yoloAff aff =
-  unit <$ runAff (const $ pure unit) aff
+    Left e -> push $ Record.insert (SProxy :: SProxy "output") ("error: " <> show e) request
 
 type Main
    = { torscraper :: Event Result
@@ -169,32 +122,11 @@ main' sources =
   , timer: mempty
   }
 
-drivers :: forall e1 e2 e3
-   . Config
-  -> { torscraper
-         :: Event Request
-         -> Eff
-              ( frp :: FRP
-              , cp :: CP.CHILD_PROCESS
-              , ref :: REF
-              , exception :: EXCEPTION
-              | e1
-              )
-              (Event Result)
-     , bot
-         :: Event Result
-         -> Eff
-              ( telegram :: TELEGRAM
-              , frp :: FRP
-              , exception :: EXCEPTION
-              , console :: CONSOLE
-              | e2
-              )
-              (Event Request)
-     , timer
-         :: Event Unit
-         -> Eff e3
-              (Event Request)
+drivers
+  :: Config
+  -> { torscraper :: Event Request -> Effect (Event Result)
+     , bot :: Event Result -> Effect (Event Request)
+     , timer :: Event Unit -> Effect (Event Request)
      }
 drivers
   { token
@@ -222,22 +154,11 @@ drivers
       , reqs <- { origin: FromTimer, id: master } <$ tick
       = pure reqs
 
-main :: forall e.
-  Eff
-    ( fs :: FS
-    , console :: CONSOLE
-    , frp :: FRP
-    , cp :: CP.CHILD_PROCESS
-    , exception :: EXCEPTION
-    , ref :: REF
-    , telegram :: TELEGRAM
-    | e
-    )
-    Unit
+main :: Effect Unit
 main = launchAff_ do
   c <- readJSON <$> readTextFile UTF8 "./config.json"
   case c of
     Left e ->
-      AffC.log $ "config.json is malformed: " <> show e
+      liftEffect <<< log $ "config.json is malformed: " <> show e
     Right config -> do
-      liftEff $ runChocoPie main' (drivers config)
+      liftEffect $ runChocoPie main' (drivers config)

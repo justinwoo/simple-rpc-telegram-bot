@@ -1,6 +1,6 @@
 {
   "name": "simple-rpc-telegram-bot",
-  "set": "kefir",
+  "set": "compiler/0.12",
   "source": "https://github.com/justinwoo/package-sets.git",
   "depends": [
     "sunde",
