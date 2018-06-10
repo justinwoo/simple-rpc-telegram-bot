@@ -1,7 +1,7 @@
 {
   "name": "simple-rpc-telegram-bot",
-  "set": "kefir",
-  "source": "https://github.com/justinwoo/package-sets.git",
+  "set": "110618-2",
+  "source": "https://github.com/justinwoo/package-sets-ex.git",
   "depends": [
     "sunde",
     "choco-pie",
