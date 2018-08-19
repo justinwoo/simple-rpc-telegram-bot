@@ -150,7 +150,7 @@ drivers
       pure $ { origin: FromUser, id: master } <$ messages
 
     timer _
-      | tick <- pure 0 <|> interval (60 * 60 * 1000)
+      | tick <- pure unit <|> unit <$ interval (60 * 60 * 1000)
       , reqs <- { origin: FromTimer, id: master } <$ tick
       = pure reqs
 
