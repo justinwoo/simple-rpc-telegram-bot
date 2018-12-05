@@ -1,6 +1,6 @@
 {
   "name": "simple-rpc-telegram-bot",
-  "set": "190818",
+  "set": "30112018",
   "source": "https://github.com/justinwoo/spacchetti.git",
   "depends": [
     "sunde",
