@@ -62,9 +62,7 @@ type Result =
 
 runTorscraper :: FilePath -> Request -> Aff Result
 runTorscraper path request = do
-  result <- Sunde.spawn
-    "node"
-    ["index.js"]
+  result <- Sunde.spawn "runghc" ["scrape.hs"]
     CP.defaultSpawnOptions { cwd = Just (unwrap path) }
   pure case result.exit of
     CP.Normally 0 -> mkResult result.stdout
