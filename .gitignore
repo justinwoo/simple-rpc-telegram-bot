@@ -1,12 +1,2 @@
-/index.js
 /config.json
-/bower_components/
 /node_modules/
-/.pulp-cache/
-/output/
-/.psci*
-/src/.webpack.js
-.psc-package
-.psc-package2nix
-.psc-ide-port
-package-lock.json
