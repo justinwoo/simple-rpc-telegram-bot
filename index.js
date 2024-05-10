@@ -28,8 +28,8 @@ function main() {
   const bot = new TelegramBot(token, { polling: true });
 
   bot.onText(/^get$/i, (msg, match) => {
-    console.log("get msg:", msg);
-    if (!msg || !msg.from || !msg.from.id || msg.from.id !== config.master) {
+    console.log("get msg:", msg?.from?.id);
+    if (msg?.from?.id !== config.master) {
       console.log("failed to match master");
       return;
     } else {
