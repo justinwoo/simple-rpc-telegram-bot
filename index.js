@@ -39,6 +39,18 @@ function main() {
     }
   });
 
+  bot.onText(/^disk$/i, (msg, match) => {
+    console.log("disk msg:", msg?.from?.id);
+    if (msg?.from?.id !== config.master) {
+      console.log("failed to match master");
+      return;
+    } else {
+      console.log("message run");
+      const result = checkDiskStatus();
+      bot.sendMessage(config.master, result);
+    }
+  });
+
   function runTimer() {
     console.log("timer run");
     const result = runScraper();
@@ -51,6 +63,29 @@ function main() {
   runTimer();
 
   console.log("running");
+}
+
+function checkDiskStatus() {
+  cp.exec("df -h /", (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Error: ${error.message}`);
+      return;
+    }
+    if (stderr) {
+      console.error(`Error: ${stderr}`);
+      return;
+    }
+
+    const lines = stdout.trim().split("\n");
+    const [, size, used, available, usedPercentage, mountPoint] =
+      lines[1].split(/\s+/);
+
+    return `Root Disk Status:
+  Filesystem: ${lines[1].split(/\s+/)[0]}
+  Total Size: ${size}
+  Free Space: ${available}
+  Used Space: ${used} (${usedPercentage})`;
+  });
 }
 
 main();
